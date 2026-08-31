@@ -131,6 +131,11 @@ body{background:#0A0A0C;color:var(--text);
 .empty .art{width:76px;height:76px;margin:0 auto 18px;border-radius:24px;background:var(--accent-soft);
   display:flex;align-items:center;justify-content:center}
 .empty .art svg{width:36px;height:36px;stroke:var(--accent)}
+/* 深色模式下 12% 主题色叠在近黑底上就是一块黑砖，图标也看不清 */
+@media(prefers-color-scheme:dark){
+  .empty .art{background:rgba(255,255,255,.075)}
+  .empty .art svg{stroke:rgba(255,255,255,.88)}
+}
 .empty h4{margin:0 0 6px;font-size:16.5px;font-weight:600;color:var(--text)}
 .empty p{margin:0;font-size:13.5px;line-height:1.7}
 
@@ -302,7 +307,14 @@ body{background:#0A0A0C;color:var(--text);
 #phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) :is(.hint code,.hint b){color:var(--hfg)}
 #phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) :is(.cell .lbl,.row .name,.field label,.psname){color:var(--hfg)}
 #phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) :is(.cell .val,.cell .desc,.row .desc,.side .time,.main .desc){color:var(--hfg-dim)}
-#phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) .empty .art{opacity:.5}
+#phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) .empty .art{
+  background:rgba(255,255,255,.14)}
+#phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) .empty .art svg{stroke:var(--hfg)}
+#phone.himm.lightbg2 :is(#s-chats,#s-chars,#s-wbs,#s-settings) .empty .art{
+  background:rgba(34,31,56,.10)}
+/* 聊天页沉浸下同理 */
+#phone.imm #s-chat .empty .art{background:rgba(255,255,255,.14)}
+#phone.imm #s-chat .empty .art svg{stroke:var(--imm-fg)}
 #phone.himm :is(#s-chats,#s-chars,#s-wbs,#s-settings) .tagmini{
   background:rgba(255,255,255,.22);color:var(--hfg);border:.5px solid rgba(255,255,255,.28)}
 #phone.himm.lightbg2 :is(#s-chats,#s-chars,#s-wbs,#s-settings) .tagmini{
@@ -422,7 +434,7 @@ body{background:#0A0A0C;color:var(--text);
   user-select:none;-webkit-user-select:none;position:relative}
 @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
 .msg.me{flex-direction:row-reverse}
-.msg .av{width:34px;height:34px;border-radius:50%;flex:0 0 auto;overflow:hidden;background:var(--grad);
+.msg .av{width:34px;height:34px;border-radius:var(--av-r,50%);flex:0 0 auto;overflow:hidden;background:var(--grad);
   display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff}
 .msg .av img{width:100%;height:100%;object-fit:cover}
 .bubble{max-width:73%;padding:9px 14px;border-radius:20px;font-size:15.5px;line-height:1.45;
@@ -430,6 +442,16 @@ body{background:#0A0A0C;color:var(--text);
   box-shadow:var(--shadow-s);border-bottom-left-radius:7px}
 .msg.me .bubble{background:var(--grad);color:#fff;border-bottom-left-radius:20px;
   border-bottom-right-radius:7px;box-shadow:0 2px 10px rgba(106,86,232,.28)}
+#s-chat.cta .msg:not(.me) .bubble{color:var(--tx-ta)}
+#s-chat.cme .msg.me .bubble{color:var(--tx-me)}
+.msg{transition:transform .22s cubic-bezier(.32,.72,0,1)}
+.msg.swiping{transition:none}
+.msg::after{content:"";position:absolute;right:6px;top:50%;width:26px;height:26px;
+  margin-top:-13px;border-radius:50%;background:var(--accent);opacity:0;
+  transition:opacity .16s;pointer-events:none;
+  -webkit-mask:center/15px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 01-8.5 8 9.4 9.4 0 01-3.7-.8L4 21l1.8-4.4A7.8 7.8 0 014 12a8 8 0 018.5-8A8 8 0 0121 12z"/></svg>');
+          mask:center/15px no-repeat url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 01-8.5 8 9.4 9.4 0 01-3.7-.8L4 21l1.8-4.4A7.8 7.8 0 014 12a8 8 0 018.5-8A8 8 0 0121 12z"/></svg>')}
+.msg.swready::after{opacity:1}
 .bubble:active{filter:brightness(.94)}
 .daysep{align-self:center;color:var(--sub);font-size:11.5px;margin:8px 0 2px;
   background:rgba(128,128,140,.13);padding:3px 11px;border-radius:20px}
@@ -1046,7 +1068,8 @@ input[type=range]{accent-color:var(--accent)}
 .hgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px 6px;padding:6px 4px 26px}
 .happ{display:flex;flex-direction:column;align-items:center;gap:7px;font-size:11px;
   color:rgba(255,255,255,.92);cursor:pointer;position:relative}
-.happ i{width:56px;height:56px;border-radius:16px;display:flex;align-items:center;
+.happ i img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
+.happ i{overflow:hidden;width:56px;height:56px;border-radius:16px;display:flex;align-items:center;
   justify-content:center;color:#fff;box-shadow:0 5px 14px rgba(0,0,0,.3);transition:transform .15s}
 .happ:active i{transform:scale(.88)}
 .happ .hb{position:absolute;top:-4px;right:6px;min-width:18px;height:18px;padding:0 5px;
@@ -1252,7 +1275,8 @@ input[type=range]{accent-color:var(--accent)}
   color:var(--sub);cursor:pointer}
 .icnitem i{width:52px;height:52px;border-radius:15px;display:flex;align-items:center;
   justify-content:center;color:#fff;box-shadow:var(--shadow-s);overflow:hidden}
-.icnitem i img{width:100%;height:100%;object-fit:cover}
+.icnitem i{overflow:hidden}
+.icnitem i img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
 .icnpal{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;padding:8px 16px 14px}
 .icnpal span{aspect-ratio:1;border-radius:13px;cursor:pointer;border:2.5px solid transparent}
 .icnpal span.on{border-color:var(--text)}
@@ -1446,8 +1470,13 @@ input[type=range]{accent-color:var(--accent)}
   opacity:0;transition:.26s cubic-bezier(.3,1.2,.6,1);pointer-events:none;z-index:99;max-width:82%;
   text-align:center;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#phone{--kb:0px}
+#phone.kbup{height:calc(100% - var(--kb))}
+#phone.kbup #chatInputBar{padding-bottom:8px}
 #homebar{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:130px;height:4.5px;
   border-radius:3px;background:currentColor;opacity:.22;z-index:70;pointer-events:none}
+/* 聊天页不画：输入栏已经贴底，再来一根就像个多余的拖拽把手 */
+#phone.inchat #homebar{display:none}
 </style>
 </head>
 <body>
@@ -2307,6 +2336,42 @@ V3 系列：加 sm / sm_dyn
 
 **一键回白修明** — 「首页沉浸」改名「系统沉浸」，开关挪到组内第一行、名字就叫「沉浸模式」，说明里写清这就是回白开关（背景和设置保留）。玻璃质感 / 天气两组只在沉浸开着时显示。另外 `wxSync` 从 rAF 改成直接调用——之前关沉浸后天气层要等下一帧才消失，页面不可见时甚至一直挂着。
 
+
+### 2026-08-31（二十四）· 需求机 14 条
+
+**修的**
+
+1. **聊天页去掉底部 home 条** — 真机上系统自己会画一根，页面里再画一根就像多余的拖拽把手。只在聊天页隐藏，别的页面留着。
+2. **自定义 App 图标显示错乱** — `.icnitem i img` 有尺寸约束，`.happ i img`（主屏和 dock）没有，图片按原始尺寸溢出圆角框、旧底色从边上透出来。补了 `object-fit:cover` + `overflow:hidden`。
+3. **保存角色会清空整个聊天设置** — `saveChar` 写了一个全新对象没有 spread 旧值，`chat`/`phone`/`phoneCfg`/`li`/`xdm`/`xlog`/`diary`/`relation` 全被抹掉。改世界书要走编辑页保存，所以症状表现为"换世界书后设置没了"。**和之前 savePhoneSet 冲掉图标是同一类**，第二次。
+7 + 11. **进聊天页 / 发消息后停在底部** — 图片、表情、字体都会在渲染之后改变高度，只设一次 `scrollTop` 会停在半截。改成 `pinChatBottom()`：当帧 + rAF + 60/180/420ms 各钉一次，还给未加载的 img 挂 onload 补钉。
+9. **弹消息慢一点** — `min(750, 240+len×24)` → `min(1600, 430+len×40)`，长句能到 1.6 秒。
+12 + 8. **长按不灵敏** — `pointermove` 一动就 `clearTimeout`，手指按住时不可能纹丝不动，所以长按经常触发不了（"只发到屏幕的消息不能编辑"其实也是这个，菜单里一直有编辑项）。改成 12px 容差，超了才算滑动取消；阈值 470→420ms；顺带屏蔽长按目标上的 contextmenu，免得系统放大镜抢焦点。
+14. **键盘抬起时底部空一条** — iOS 上键盘弹出后 `100vh` 不变。用 `visualViewport` 算出真实可见高度，超过 80px 就把机身按 `--kb` 收缩，并重新钉底。
+
+**加的**
+
+4. **头像形状可调** — 聊天设置滑杆，0（方形）到 50%（圆形），中间是圆角方形。走 CSS 变量下发。
+5. **气泡文字颜色可调** — 我方 / 对方各一个 hex 输入 + 取色器，留空＝跟随默认配色。预览框实时反映。
+6. **镜头必带** — 原来只在中间提了一句，模型经常漏。现在写成"数组最后一个元素永远是 pov 对象，没有它就是格式错误"，给了正确示例，末尾重申里也加了一句；仍然漏掉的话会**单独补一次请求**生成镜头，不让这条回复空着。
+10. **左滑引用** — 气泡上向左拖，超过 52px 松手即引用，右侧渐显一个引用图标，带震动反馈。竖向位移超 14px 判定为滚列表、自动放弃。
+13. **X 小号主动私信** — 每角色开关 + 概率 + 冷却小时数。主聊天安静超 30 分钟后掷骰子，中了就让 TA 用 X 匿名号主动私信你，借另一个面具说现实里说不出口的话。会推送通知，也会记进互通日志，主聊天知道自己发过。
+
+
+### 2026-08-31（二十五）
+
+**模型不守格式的代码级兜底** — 提示词已经反复强调过，但没有哪个模型 100% 守规矩，所以加了 `sanitizeParts()` 挂在 `parseReply` 出口：
+
+- **pov 混进正文**（模型把镜头对象当普通消息发出来）→ 正则把 `{"type":"pov","content":"…"}` 从文本里抠出来还原成 pov，JSON 解析失败还有一层字段级兜底
+- **多条挤在一条里** → 按换行拆成多条，条数上限跟 `maxMessages` 走
+- 模型有时吐的是**字面量 `
+`**（两个字符）而不是真换行，一并当断行处理
+- 剥外层引号时只在首尾成对时才剥，`他说："走吧"` 的尾引号不会被吃掉
+
+**空态图标跟随背景** — 原来 `.empty .art` 是 12% 主题色底 + 主题色描边，深色模式下叠在近黑底上就是一块黑砖、图标也看不清（其他字都是白的，只有它是黑的）。改成：深色模式白底白描边、系统沉浸下跟 `--hfg` 走、聊天页沉浸跟 `--imm-fg` 走。全局生效，所有空态一起修好。
+
+**聊天设置页分段重排** — 18 个分组平铺要滑五屏，现在按语义收成四段：**外观**（预览 / 气泡 / 文字颜色 / 头像形状 / 字号 / 背景）→ **TA 怎么回你**（预设 / 上下文 / 第三视角 / 主动发消息）→ **TA 知道什么**（世界书 / 记忆 / 起居注分享 / X 小号私信）→ **管理**（调试 / 角色图片 / 危险操作）。同时把 15 条说明也收进了标题旁的问号里，跟设置页一致。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2319,6 +2384,10 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **正则里的 `\r?\n` 匹配错了** → JS 正则 `/\r?\n/` 是「反斜杠 + 可选 r + 反斜杠 + n」四个字符，不是我要的两字符字面量 `
+`。要写 `/(?:\r)?\n/`。
+- **保存角色整个覆盖对象** → `saveChar` 没有 spread 旧值，聊天设置 / 手机 / lithium / 日记 / 关系全丢。写 dbPut 时凡是"部分更新"都必须先 spread 旧对象——这是第二次栽（第一次是 savePhoneSet 冲掉自定义图标）。
+- **长按被 pointermove 秒杀** → 监听里 `pointermove` 无条件 clearTimeout，手指微抖就取消。触摸交互的移动判定必须给容差。
 - **静态 HTML 里写了 `${...}`** → 又一次在非模板字符串的地方写模板语法（朋友圈入口按钮），页面上直接显示成源码。第二次踩，静态区只能写死 HTML。
 - **dock 没贴底** → 日志里写了 `margin-top:auto`，代码里写的却是 `margin:26px 0 0`。写完日志要跟代码对一遍。另外 `auto` 只在内容比视口矮时有效，内容长了还是会被推下去——补了 `position:sticky;bottom:2px` 才算真贴住。
 - **换角色后注入胶囊还是上一个角色的** → 全局 `lastInject` 切角色没人清，`.show` class 一直留在共用 DOM 上。清空 + 记 cid 双保险。
@@ -2417,6 +2486,8 @@ const DEFAULT_CHAT={
   bubbleMe:'', bubbleTa:'', fontSize:15.5,
   chatBg:'', immersive:true, setImmersive:false, showInject:false, historyCount:0,
   journalShare:false, journalRate:20, presetId:'', povEnabled:false,
+  xdmEnabled:false, xdmRate:15, xdmHours:6,
+  avatarRadius:50, textMe:'', textTa:'',
   proEnabled:false, proMinutes:60, proDaily:5
 };
 const chatCfg=c=>({...DEFAULT_CHAT,...(c&&c.chat||{})});
@@ -2501,6 +2572,7 @@ function navLabel(){
 /* ---------- 基础 UI ---------- */
 function show(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id));
+  document.getElementById('phone').classList.toggle('inchat',id==='s-chat');
   document.getElementById('tabbar').style.display=
     document.getElementById(id).classList.contains('overlay')?'none':'flex';
   refreshImm(id);
@@ -2595,18 +2667,90 @@ const IC=(n,sz,fill)=>`<svg class="ic" viewBox="0 0 24 24" width="${sz||20}" hei
   +`fill="${fill?'currentColor':'none'}" stroke="currentColor" stroke-width="1.8" `
   +`stroke-linecap="round" stroke-linejoin="round">${ICP[n]||''}</svg>`;
 
+/* ---------- 左滑引用 ----------
+   在气泡上横向拖，超过阈值松手就把这条设成引用 */
+let swQ=null;
+function initSwipeQuote(){
+  const box=document.getElementById('chatBody');
+  if(!box) return;
+  box.addEventListener('pointerdown',e=>{
+    if(selectMode) return;
+    const el=e.target.closest('.msg[data-lpid]'); if(!el) return;
+    swQ={el,id:el.dataset.lpid,x:e.clientX,y:e.clientY,on:false};
+  });
+  box.addEventListener('pointermove',e=>{
+    if(!swQ) return;
+    const dx=e.clientX-swQ.x, dy=e.clientY-swQ.y;
+    if(!swQ.on){
+      if(Math.abs(dy)>14){ swQ=null; return; }        // 在竖着滚列表，放手
+      if(dx>-16) return;                              // 还没算左滑
+      swQ.on=true; swQ.el.classList.add('swiping');
+    }
+    const off=Math.max(-84,Math.min(0,dx));
+    swQ.el.style.transform=`translateX(${off}px)`;
+    swQ.el.classList.toggle('swready',off<=-52);
+  });
+  const end=async()=>{
+    if(!swQ) return;
+    const {el,id,on}=swQ; swQ=null;
+    if(!on) return;
+    const ready=el.classList.contains('swready');
+    el.classList.remove('swiping','swready');
+    el.style.transform='';
+    if(!ready) return;
+    if(navigator.vibrate) navigator.vibrate(10);
+    const m=(await msgsOf(curCharId)).find(x=>x.id===id);
+    if(m) setQuote(m);
+  };
+  box.addEventListener('pointerup',end);
+  box.addEventListener('pointercancel',end);
+}
+
+/* ---------- 键盘：iOS 上键盘弹出后 100vh 不变，底部会空出一条 ----------
+   用 visualViewport 把机身高度压到真正可见的那部分 */
+function initKeyboardFix(){
+  const vv=window.visualViewport;
+  if(!vv) return;
+  const phone=document.getElementById('phone');
+  let raf=0;
+  const apply=()=>{
+    raf=0;
+    const gap=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
+    phone.style.setProperty('--kb',gap+'px');
+    phone.classList.toggle('kbup',gap>80);
+    if(gap>80&&document.getElementById('s-chat').classList.contains('active')) pinChatBottom();
+  };
+  const on=()=>{ if(!raf) raf=requestAnimationFrame(apply); };
+  vv.addEventListener('resize',on);
+  vv.addEventListener('scroll',on);
+  apply();
+}
+
 /* ---------- 长按 ---------- */
-let lpTimer=null, lpFired=false;
+let lpTimer=null, lpFired=false, lpX=0, lpY=0;
 document.addEventListener('pointerdown',e=>{
   const el=e.target.closest('[data-lp]'); if(!el) return;
   clearTimeout(lpTimer);
+  lpX=e.clientX; lpY=e.clientY;
   lpTimer=setTimeout(()=>{
     lpFired=true; if(navigator.vibrate) navigator.vibrate(12);
     window[el.dataset.lp](el.dataset.lpid);
-  },470);
+  },420);
 });
-['pointerup','pointermove','pointercancel','scroll'].forEach(ev=>
-  document.addEventListener(ev,()=>clearTimeout(lpTimer),true));
+/* 手指按住时几乎不可能纹丝不动 —— 给 12px 容差，超了才当成滑动取消。
+   原来 pointermove 一动就 clearTimeout，所以长按经常触发不了 */
+document.addEventListener('pointermove',e=>{
+  if(!lpTimer) return;
+  if(Math.abs(e.clientX-lpX)>12||Math.abs(e.clientY-lpY)>12){
+    clearTimeout(lpTimer); lpTimer=null;
+  }
+},true);
+['pointerup','pointercancel','scroll'].forEach(ev=>
+  document.addEventListener(ev,()=>{ clearTimeout(lpTimer); lpTimer=null; },true));
+/* 长按弹菜单时别顺带把系统的文字选择/放大镜也唤起来 */
+document.addEventListener('contextmenu',e=>{
+  if(e.target.closest('[data-lp]')) e.preventDefault();
+});
 function guard(){ if(lpFired){ setTimeout(()=>lpFired=false,60); return true; } return false; }
 
 /* ---------- 面板 ---------- */
@@ -3571,6 +3715,7 @@ async function saveChar(){
   const wbIds=[...document.querySelectorAll('#f-wbs .chip.on')].map(e=>e.dataset.id);
   const old=editingCharId?characters.find(x=>x.id===editingCharId):null;
   await dbPut('characters',{
+    ...(old||{}),          // 聊天设置 / 手机 / lithium / 日记 / 关系都在旧对象上，别整个盖掉
     id:editingCharId||uid(), name, avatar:draftAvatar,
     bio:document.getElementById('f-bio').value,
     xname:((document.getElementById('f-xname')||{}).value||'').trim(),
@@ -4352,6 +4497,7 @@ function collapseHints(bodyId){
   for(const el of kids){
     if(el.classList.contains('grouptitle')){ lastTitle=el; continue; }
     if(!el.classList.contains('hint')||el.id) continue;
+    if(el.dataset.keep) continue;
     const target=el.dataset.tipFor?byName[el.dataset.tipFor]:lastTitle;
     if(!target) continue;
     let btn=target.querySelector('.tipbtn');
@@ -4628,6 +4774,7 @@ function bubbleHTML(m,cfg,isMe){
 
 async function renderChat(toBottom){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c), cfg=chatCfg(c);
+  applyChatSkin(cfg);
   let ms=await msgsOf(curCharId);
   if(!ms.length&&c.greeting&&c.greeting.trim()){
     const m={id:uid(),characterId:c.id,role:'assistant',content:c.greeting.trim(),timestamp:Date.now()};
@@ -4665,7 +4812,7 @@ async function renderChat(toBottom){
   if(lastFail) html+=`<div class="failbar">${esc(lastFail)} <b onclick="retry()">重试</b></div>`;
   box.innerHTML=html;
   if(typingOn){ const t=typingOn; typingOn=false; setTyping(t); }
-  if(toBottom!==false) box.scrollTop=box.scrollHeight;
+  if(toBottom!==false) pinChatBottom();
   else box.scrollTop=box.scrollHeight-prevH+prevTop;
   onChatScroll();
   if(selectMode) updateSelBar();
@@ -4695,6 +4842,18 @@ async function showPov(id){
 }
 function hidePov(){ const p=document.getElementById('povCard'); if(p) p.remove(); }
 
+/* 头像圆角 / 气泡文字颜色：都靠 CSS 变量下发，省得每条消息拼 style */
+function applyChatSkin(cfg){
+  const el=document.getElementById('s-chat');
+  if(!el) return;
+  const r=Number.isFinite(+cfg.avatarRadius)?+cfg.avatarRadius:50;
+  el.style.setProperty('--av-r',r+'%');
+  el.style.setProperty('--tx-me',cfg.textMe||'');
+  el.style.setProperty('--tx-ta',cfg.textTa||'');
+  el.classList.toggle('cme',!!cfg.textMe);
+  el.classList.toggle('cta',!!cfg.textTa);
+}
+
 /* 输入动效：顶栏副标题 + 角色侧的三点气泡 */
 let typingOn=false;
 function setTyping(on){
@@ -4718,6 +4877,18 @@ function setTyping(on){
 
 function loadMore(){ chatShown+=PAGE; renderChat(false); }
 function scrollChatBottom(){ const b=document.getElementById('chatBody'); b.scrollTo({top:b.scrollHeight,behavior:'smooth'}); }
+/* 图片、表情、字体都会在渲染之后才改变高度，只设一次 scrollTop 会停在半截。
+   连着钉几帧 + 等图片 onload，才能真的落到底 */
+function pinChatBottom(){
+  const b=document.getElementById('chatBody'); if(!b) return;
+  const go=()=>{ b.scrollTop=b.scrollHeight; };
+  go();
+  requestAnimationFrame(go);
+  setTimeout(go,60); setTimeout(go,180); setTimeout(go,420);
+  b.querySelectorAll('img').forEach(im=>{
+    if(!im.complete) im.addEventListener('load',go,{once:true});
+  });
+}
 function onChatScroll(){
   const b=document.getElementById('chatBody');
   document.getElementById('toBottom').classList.toggle('show',b.scrollHeight-b.scrollTop-b.clientHeight>240);
@@ -4991,11 +5162,13 @@ function renderChatSet(){
         <div class="desc" style="font-size:13px;margin-top:2px">编辑设定、头像、身份、世界书</div>
       </div>${CHEV}</div></div>
 
+
+    <div class="secband">外观</div>
     <div class="grouptitle">预览</div>
     <div class="previewbox" ${draftChatBg?'onclick="pickChatBg()" style="cursor:pointer;'
       +`background:center/cover no-repeat url('${draftChatBg}')"`:'style="background:var(--chat-bg)"'}>
-      <div class="pb ta" style="background:${g.bubbleTa||'var(--bubble-ta)'};color:${g.bubbleTa?'#fff':'var(--bubble-ta-text)'};font-size:${g.fontSize}px">在呢，刚洗完澡</div>
-      <div class="pb me" style="background:${g.bubbleMe||'var(--grad)'};font-size:${g.fontSize}px">这么晚还在练？</div>
+      <div class="pb ta" style="background:${g.bubbleTa||'var(--bubble-ta)'};color:${g.textTa||(g.bubbleTa?'#fff':'var(--bubble-ta-text)')};font-size:${g.fontSize}px">在呢，刚洗完澡</div>
+      <div class="pb me" style="background:${g.bubbleMe||'var(--grad)'};color:${g.textMe||'#fff'};font-size:${g.fontSize}px">这么晚还在练？</div>
     </div>
 
     <div class="grouptitle">我的气泡</div>
@@ -5011,6 +5184,24 @@ function renderChatSet(){
       ${hexRow('bubbleTa',g.bubbleTa,'var(--bubble-ta)')}
     </div></div>
     <div class="hint">第一个是跟随主题的默认色。</div>
+
+    <div class="grouptitle">文字颜色</div>
+    <div class="group">
+      <div class="field"><label>我的气泡文字</label>
+        ${hexRow('textMe',g.textMe,'#ffffff')}</div>
+      <div class="field"><label>对方气泡文字</label>
+        ${hexRow('textTa',g.textTa,'var(--bubble-ta-text)')}</div>
+    </div>
+    <div class="hint">留空＝跟随气泡自动配色（我的白字、对方深色字）。深底浅字或浅底深字自己配。</div>
+
+    <div class="grouptitle">头像形状</div>
+    <div class="group"><div class="field">
+      <div class="inline"><input type="range" min="0" max="50" step="2" value="${g.avatarRadius}"
+        oninput="setCfg('avatarRadius',parseInt(this.value),true);applyChatSkin({...draftCfg});
+          this.nextElementSibling.textContent=this.value==50?'圆形':this.value+'%'" style="flex:1">
+        <span style="width:52px;text-align:right;color:var(--sub)">${g.avatarRadius==50?'圆形':g.avatarRadius+'%'}</span></div>
+    </div></div>
+    <div class="hint">左边是方形，右边是圆形，中间是圆角方形。</div>
 
     <div class="grouptitle">字号</div>
     <div class="group"><div class="field">
@@ -5033,11 +5224,33 @@ function renderChatSet(){
     </div>
     ${draftChatBg?`<div class="hint">沉浸模式：背景图通栏铺满，顶栏和输入栏透明浮在图上。<br>设置页沉浸模式下每个分组会变成毛玻璃。</div>`:''}
 
+
+    <div class="secband">TA 怎么回你</div>
+    <div class="grouptitle">预设提示词</div>
+    <div class="group"><div class="cell" onclick="openPresets('char')">
+      <div class="lbl">这个角色用的预设</div>
+      <div class="val">${(()=>{const v=g.presetId||'';
+        if(v==='none') return '不使用';
+        if(!v) return '跟随全局'+(S.presetId?'（'+esc(((presets.find(p=>p.id===S.presetId)||{}).name)||'已删除')+'）':'（无）');
+        return esc(((presets.find(p=>p.id===v)||{}).name)||'已删除');})()}</div>${CHEV}</div></div>
+    <div class="hint">决定 TA 怎么回你——语气、句子长短、会不会说教、能不能跳出角色。
+      改完记得点最下面的保存。</div>
+
     <div class="grouptitle">上下文</div>
     <div class="group"><div class="field"><label>历史记忆读取条数</label>
       <input type="number" min="0" max="200" value="${g.historyCount}"
         oninput="setCfg('historyCount',parseInt(this.value)||0,true)"></div></div>
     <div class="hint">这个角色单独的设置。填 <b>0</b> 表示跟随全局（当前全局是 ${S.historyCount} 条）。</div>
+
+    <div class="grouptitle">第三视角镜头</div>
+    <div class="group">
+      <div class="cell static"><div class="lbl">记录每次回复的动作神态</div>
+        <label class="switch"><input type="checkbox" ${g.povEnabled?'checked':''}
+          onchange="setCfg('povEnabled',this.checked,true)"><i></i></label></div>
+    </div>
+    <div class="hint">开启后 TA 每次回消息都会额外生成一段<b>第三人称</b>的画面——
+      TA 发这几条消息时在做什么、什么表情、身边什么环境。
+      点 TA 消息旁边的<b>头像</b>就能看。每次回复会稍微多花一点 token。</div>
 
     <div class="grouptitle">角色主动发消息</div>
     <div class="group">
@@ -5053,15 +5266,19 @@ function renderChatSet(){
     </div>
     <div class="hint">每分钟检查一次，超时就让 TA 主动说点什么。<b>会真的消耗 API 额度</b>，所以有每日上限。</div>
 
-    <div class="grouptitle">第三视角镜头</div>
+
+    <div class="secband">TA 知道什么</div>
+    <div class="grouptitle">世界书</div>
+    <div id="cs-wbs" style="padding:2px 2px 4px"></div>
+    <div id="cs-wbs-global"></div>
+    <div class="hint">勾上就参与匹配，改完点最下面的保存。全局世界书所有角色自动带。</div>
+
+    <div class="grouptitle">记忆与收藏</div>
     <div class="group">
-      <div class="cell static"><div class="lbl">记录每次回复的动作神态</div>
-        <label class="switch"><input type="checkbox" ${g.povEnabled?'checked':''}
-          onchange="setCfg('povEnabled',this.checked,true)"><i></i></label></div>
+      <div class="cell" onclick="goMemory()"><div class="lbl">记忆库</div>
+        <div class="val">${memsOf(curCharId).length} 条</div>${CHEV}</div>
+      <div class="cell" onclick="openFavs()"><div class="lbl">收藏的消息</div>${CHEV}</div>
     </div>
-    <div class="hint">开启后 TA 每次回消息都会额外生成一段<b>第三人称</b>的画面——
-      TA 发这几条消息时在做什么、什么表情、身边什么环境。
-      点 TA 消息旁边的<b>头像</b>就能看。每次回复会稍微多花一点 token。</div>
 
     <div class="grouptitle">起居注分享</div>
     <div class="group">
@@ -5075,28 +5292,24 @@ function renderChatSet(){
     <div class="hint">安静超过 20 分钟后，按这个概率挑一件「起居注」里带细节的事讲给你听。
       讲过的不会重复讲。要先在 TA 的手机 → 日程里生成过起居注才有内容。</div>
 
-    <div class="grouptitle">预设提示词</div>
-    <div class="group"><div class="cell" onclick="openPresets('char')">
-      <div class="lbl">这个角色用的预设</div>
-      <div class="val">${(()=>{const v=g.presetId||'';
-        if(v==='none') return '不使用';
-        if(!v) return '跟随全局'+(S.presetId?'（'+esc(((presets.find(p=>p.id===S.presetId)||{}).name)||'已删除')+'）':'（无）');
-        return esc(((presets.find(p=>p.id===v)||{}).name)||'已删除');})()}</div>${CHEV}</div></div>
-    <div class="hint">决定 TA 怎么回你——语气、句子长短、会不会说教、能不能跳出角色。
-      改完记得点最下面的保存。</div>
-
-    <div class="grouptitle">世界书</div>
-    <div id="cs-wbs" style="padding:2px 2px 4px"></div>
-    <div id="cs-wbs-global"></div>
-    <div class="hint">勾上就参与匹配，改完点最下面的保存。全局世界书所有角色自动带。</div>
-
-    <div class="grouptitle">记忆与收藏</div>
+    <div class="grouptitle">X 小号主动私信</div>
     <div class="group">
-      <div class="cell" onclick="goMemory()"><div class="lbl">记忆库</div>
-        <div class="val">${memsOf(curCharId).length} 条</div>${CHEV}</div>
-      <div class="cell" onclick="openFavs()"><div class="lbl">收藏的消息</div>${CHEV}</div>
+      <div class="cell static"><div class="lbl">开启</div>
+        <label class="switch"><input type="checkbox" ${g.xdmEnabled?'checked':''}
+          onchange="setCfg('xdmEnabled',this.checked)"><i></i></label></div>
+      ${g.xdmEnabled?`<div class="field"><label>触发概率（%）</label>
+        <input type="number" min="1" max="100" value="${g.xdmRate}"
+          oninput="setCfg('xdmRate',parseInt(this.value)||15,true)"></div>
+      <div class="field"><label>两条之间至少隔几小时</label>
+        <input type="number" min="1" max="72" value="${g.xdmHours}"
+          oninput="setCfg('xdmHours',parseInt(this.value)||6,true)"></div>`:''}
     </div>
+    <div class="hint">主聊天安静超过 30 分钟后掷骰子，中了就让 TA 用 X 上的匿名小号
+      主动私信你——借另一个身份说现实里说不出口的话。要先在 TA 的手机里刷出 lithium 账号。
+      收到会推送通知，内容在 X → 那个账号 → 私信里。</div>
 
+
+    <div class="secband">管理</div>
     <div class="grouptitle">调试</div>
     <div class="group">
       <div class="cell static"><div class="lbl">显示注入管理器</div>
@@ -5119,6 +5332,7 @@ function renderChatSet(){
     <button class="btn" style="margin-top:14px" onclick="saveChatSet()">保存设置</button>
     <div style="height:20px"></div>`;
   renderCsWb();
+  collapseHints('chatSetBody');
 }
 
 /* 聊天设置里的世界书挂载区 */
@@ -5181,6 +5395,7 @@ function hexCfg(key,v){
   if(!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(t)) return;   // 还没打完，先不动
   draftCfg[key]=t;
   paintBubblePreview();
+  if(key==='textMe'||key==='textTa') applyChatSkin({...draftCfg});
 }
 function paintBubblePreview(){
   const g=draftCfg;
@@ -8195,6 +8410,8 @@ function xContext(c){
     ?`- X 私信：对方发「${x.mine}」，你回「${x.reply}」`
     :x.kind==='mypost'
     ?`- 对方发了帖子「${x.post}」，你用小号评论了「${x.reply}」`
+    :x.kind==='xdmPush'
+    ?`- 你用小号主动私信了对方：「${x.reply}」`
     :`- 你的帖子「${x.post}」下对方评论「${x.mine}」，你回「${x.reply}」`).join('\n');
   return `\n\n# **X 上的互动**
 你在 X 上有个匿名账号「${L.handle||c.name}」，对方（${myXName()}）关注了它，最近有这些互动：
@@ -8307,6 +8524,56 @@ async function journalTick(){
     curCharId=keep;
     break;
   }
+}
+
+/* ---------- 角色用 X 小号主动私信 ----------
+   条件：主聊天安静够久 + 这个角色有 lithium 账号 + 骰子过了。
+   角色在私信里是"另一个身份"，认不认得出你由剧情定 */
+let xDmBusy=false;
+async function xDmTick(){
+  if(xDmBusy||sending||!db) return;
+  for(const c of characters){
+    const g=chatCfg(c);
+    if(!g.xdmEnabled) continue;
+    const L=c.li; if(!L||!(L.posts||[]).length) continue;
+    const last=(c.xdm||[]).filter(m=>m.from==='them').slice(-1)[0];
+    if(last&&Date.now()-(last.at||0)<(g.xdmHours||6)*3600e3) continue;
+    const ms=await msgsOf(c.id);
+    if(!ms.length) continue;
+    if(Date.now()-ms[ms.length-1].timestamp<30*60000) continue;   // 正聊着就别插一脚
+    if(Math.random()*100>(g.xdmRate||15)) continue;
+    xDmBusy=true;
+    try{ await xDmSend(c); }catch(e){}
+    xDmBusy=false;
+    break;
+  }
+}
+async function xDmSend(c){
+  const L=liData(c), me=personaOf(c);
+  const recent=(await msgsOf(c.id)).slice(-8);
+  const convo=recent.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
+  const hist=(c.xdm||[]).slice(-8).map(m=>(m.from==='me'?myXName():c.name)+'：'+m.text).join('\n');
+  const q=`你是"${c.name}"（${c.bio||'无设定'}），在 X 上经营匿名账号「${esc0(L.handle||c.name)}」。
+「${esc0(myXName())}」关注了这个号。这个人就是你现实里认识的「${esc0(me.name)}」——
+但在 X 上你们不一定挑明了身份。
+
+你们现实里最近的对话：
+${convo||'（还没聊过）'}
+${hist?`\nX 私信记录：\n${hist}`:''}
+
+现在**由你主动**发一条 X 私信过去。要求：
+- 借着小号的身份说点现实里说不出口的话，或者试探、或者装不认识地搭话
+- 语气和你在主聊天里的样子要有区别——这是另一个面具
+- 10-50 字，像真的私信，不要客套开场白
+只输出私信文本，不要解释、不要引号。`;
+  const t=(await callAPI([{role:'user',content:q}])).trim().slice(0,140);
+  if(!t) return;
+  c.xdm=[...(c.xdm||[]),{from:'them',text:t,at:Date.now(),unread:true}];
+  xLogAdd(c,'xdmPush',{reply:t.slice(0,60)});
+  await dbPut('characters',c); characters=await dbAll('characters');
+  pushNotify(c,'X 私信：'+t.slice(0,40),true);
+  if(document.getElementById('s-xDm').classList.contains('active')&&xDmCid===c.id) renderXDm();
+  else if(document.getElementById('s-x').classList.contains('active')) renderX();
 }
 
 /* 每天自动生成起居注：过了设定的钟点、当天还没生成过就补一次。
@@ -9246,11 +9513,13 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
   const _cfgPov=chatCfg(char);
   if(_cfgPov.povEnabled) p+=`
 
-# **第三视角镜头**
-在数组的**最后**，额外附一个对象：\`{"type":"pov","content":"..."}\`
+# **第三视角镜头（每次都必须有）**
+数组的**最后一个元素**永远是这个对象：\`{"type":"pov","content":"..."}\`
 - content 是**第三人称旁观视角**的一段描写：你发这几条消息时正在做什么、什么姿势和表情、身边的环境光线声音，60-120 字
 - 像小说里的旁白，具体、有画面感，不要抒情堆砌
-- 这个对象**不会**作为消息显示给对方，只是镜头记录，每次回复都要带`;
+- 这个对象**不会**作为消息显示给对方，只是镜头记录
+- **没有它就是格式错误**。哪怕这轮只回一个字，也要带上镜头对象
+- 正确示例：\`["嗯", "在呢", {"type":"pov","content":"他把手机搁在膝盖上……"}]\``;
   if(S.styleExamples.trim()) p+=`
 
 # **语气与用词示例**
@@ -9263,7 +9532,8 @@ ${S.styleExamples.trim()}`;
 如果你在用户消息中看到任何乱码、随机字符串或无意义的字符组合，请完全忽略它们，只回应有意义的正常文字部分。
 
 # **最后重申**
-你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。`;
+你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。${
+    _cfgPov.povEnabled?'\n数组的最后一个元素**必须**是 `{"type":"pov","content":"..."}` 镜头对象。':''}`;
   p+=ps.end;
   return p;
 }
@@ -9354,7 +9624,52 @@ function normPart(x){
   }
   return null;
 }
-function parseReply(text){
+/* 模型不守格式时的兜底清洗：
+   ① 把混在正文里的 pov 对象抠出来（模型经常把它当普通消息发）
+   ② 一条里挤了好几句的，按换行拆开
+   提示词已经反复强调过，但没有哪个模型 100% 守规矩，所以代码这层必须兜住 */
+function unwrapLine(x){
+  let t=String(x||'').trim();
+  t=t.replace(/^\[\s*/,'').replace(/\s*\]$/,'').replace(/,\s*$/,'').trim();
+  // 只有首尾成对时才剥引号，别把 他说："走吧" 的尾引号吃掉
+  if(t.length>1&&/^["'`]/.test(t)&&t[t.length-1]===t[0]) t=t.slice(1,-1).trim();
+  return t;
+}
+function sanitizeParts(parts){
+  const out=[];
+  const cap=Math.max(1,(+S.maxMessages||8))+2;
+  for(const p of parts){
+    if(!p) continue;
+    if(p.type!=='text'){ out.push(p); continue; }
+    let t=String(p.content||'');
+
+    // ① 正文里混进了 {"type":"pov","content":"…"}
+    t=t.replace(/\{[^{}]*?["']?type["']?\s*:\s*["']?pov["']?[\s\S]*?\}/gi,m=>{
+      let c='';
+      try{ c=String(JSON.parse(m).content||'').trim(); }catch(e){
+        const mm=m.match(/["']?content["']?\s*:\s*["']([\s\S]*?)["']\s*[},]/i);
+        if(mm) c=mm[1].trim();
+      }
+      if(c) out.push({type:'pov',content:c});
+      return '';
+    });
+    // ② 裸奔的 pov: xxx / 【镜头】xxx 这类残留
+    t=t.replace(/^\s*(?:["']?pov["']?\s*[:：]|【?第三视角】?\s*[:：]?|【镜头】\s*)/i,m=>{
+      return '';
+    });
+
+    // ③ 一条里挤了多条 —— 按换行拆
+    //    模型有时吐的是字面量 \n（两个字符）而不是真换行，一并当断行处理
+    t=t.replace(/(?:\\r)?\\n/g,'\n');
+    for(const line of t.split(/\n+/)){
+      const v=unwrapLine(line);
+      if(v&&out.filter(x=>x.type==='text').length<cap) out.push({type:'text',content:v});
+    }
+  }
+  return out;
+}
+function parseReply(text){ return sanitizeParts(parseReplyRaw(text)); }
+function parseReplyRaw(text){
   let t=String(text).trim()
     .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
   const norm=a=>a.map(normPart).filter(Boolean);
@@ -9458,9 +9773,22 @@ ${regenNote}
   try{
     let parts=parseReply(await callAPI(payload));
     if(!parts.length) throw new Error('没解析出内容');
-    const povPart=parts.find(p=>p.type==='pov');
+    let povPart=parts.find(p=>p.type==='pov');
     parts=parts.filter(p=>p.type!=='pov');
     if(!parts.length) throw new Error('没解析出内容');
+    // 说好每次都带，模型漏了就单独补一次
+    if(!povPart&&chatCfg(char).povEnabled){
+      try{
+        const said=parts.map(p=>p.content).filter(Boolean).join(' / ');
+        const q=`你是"${char.name}"：${char.bio||'（无设定）'}
+你刚刚给对方连发了这几条消息：${said}
+
+用**第三人称旁观视角**写你发这几条消息时的画面：在做什么、什么姿势表情、身边的环境光线声音。
+60-120 字，具体有画面感，不要抒情堆砌。只输出这段描写，不要引号不要解释。`;
+        const t=(await callAPI([{role:'user',content:q}])).trim();
+        if(t) povPart={type:'pov',content:t};
+      }catch(e){}
+    }
     for(const p of parts){
       if(p.type==='recall'){ await doAiRecall(); continue; }
       if(p.type==='transfer_action'){ await aiTfAct(p.content); continue; }
@@ -9468,7 +9796,7 @@ ${regenNote}
       if(povPart) row.meta={...row.meta,pov:String(povPart.content||'').slice(0,300)};
       await dbPut('messages',row);
       await renderChat();
-      await new Promise(r=>setTimeout(r,Math.min(750,240+p.content.length*24)));
+      await new Promise(r=>setTimeout(r,Math.min(1600,430+p.content.length*40)));
     }
     const c=characters.find(x=>x.id===curCharId);
     if(document.hidden) pushNotify(c,parts.map(p=>p.content).join(' '));
@@ -9637,11 +9965,14 @@ async function ensurePersona(){
   await loadAll();
   await ensurePersona();
 
+  initKeyboardFix();
+  initSwipeQuote();
   tickClock(); setInterval(tickClock,20000);
   setInterval(proactiveTick,60000);
   setInterval(autoDiaryTick,60000);
   setInterval(journalTick,60000);
   setInterval(journalAutoTick,10*60000);
+  setInterval(xDmTick,7*60000);
   setTimeout(journalAutoTick,8000);
   const ta=document.getElementById('chatInput');
   const or=document.getElementById('orInput');
