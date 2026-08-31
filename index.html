@@ -507,20 +507,6 @@ body{background:#0A0A0C;color:var(--text);
 #chatInputBar{flex:0 0 auto;display:flex;gap:9px;padding:9px 12px 12px;align-items:flex-end;
   background:var(--nav);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
   border-top:.5px solid var(--line)}
-/* 底栏蒙层：黑色渐变淡入淡出（取自 7e5e5827 那一版，用户认可的效果）。
-   只做底栏，顶栏保持原样。z-index:0 垫在输入栏内容之下、盖住背景。 */
-#s-chat #chatInputBar{position:relative}
-#s-chat #chatInputBar::before{content:"";position:absolute;left:0;right:0;bottom:0;
-  height:230%;pointer-events:none;z-index:0;
-  background:linear-gradient(to top,var(--chat-bg) 40%,rgba(0,0,0,.10) 70%,transparent)}
-#s-chat #chatInputBar>*{position:relative;z-index:1}
-/* 沉浸模式下用半透明深色，让壁纸仍然透出来 */
-#phone.imm #s-chat #chatInputBar::before{
-  background:linear-gradient(to top,rgba(10,10,16,.62) 0%,rgba(10,10,16,.44) 34%,rgba(10,10,16,.16) 68%,transparent 100%)}
-#phone.imm.lightbg #s-chat #chatInputBar::before{
-  background:linear-gradient(to top,rgba(245,245,250,.66) 0%,rgba(245,245,250,.46) 34%,rgba(245,245,250,.18) 68%,transparent 100%)}
-#phone.bare #s-chat #chatInputBar::before{display:none}
-
 #chatInput{flex:1;resize:none;max-height:108px;min-height:38px;padding:8px 15px;background:var(--card);
   border:.5px solid var(--line2);border-radius:19px;color:var(--text);font:inherit;font-size:15.5px;
   outline:none;line-height:1.4}
@@ -11072,13 +11058,27 @@ function togglePlus(){
   if(open) renderPlusPanel();
   p.classList.toggle('open',open);
   document.getElementById('plusBtn').classList.toggle('on',open);
-  if(open){
-    document.getElementById('chatInput').blur();
-    setTimeout(scrollChatBottom,80);
-  }
+  // 面板展开/收起动画是 320ms，80ms 时高度还没变完，那时候滚是白滚。
+  // 整个过程持续钉底，内容才会跟着面板一起上移，而不是被顶到面板后面。
+  document.getElementById('chatInput').blur();
+  const box=document.getElementById('chatBody');
+  const t0=performance.now();
+  const stick=()=>{
+    box.scrollTop=box.scrollHeight;
+    if(performance.now()-t0<420) requestAnimationFrame(stick);
+  };
+  requestAnimationFrame(stick);
 }
 function closePlus(){
+  const wasOpen=document.getElementById('plusPanel').classList.contains('open');
   document.getElementById('plusPanel').classList.remove('open');
+  if(wasOpen){
+    const box=document.getElementById('chatBody');
+    const t0=performance.now();
+    const stick=()=>{ box.scrollTop=box.scrollHeight;
+      if(performance.now()-t0<420) requestAnimationFrame(stick); };
+    requestAnimationFrame(stick);
+  }
   document.getElementById('plusBtn').classList.remove('on');
 }
 function plusPick(i){ closePlus(); navReset(); setTimeout(()=>PLUS_ITEMS[i].fn(),180); }
