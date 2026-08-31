@@ -421,8 +421,12 @@ body{background:#0A0A0C;color:var(--text);
 /* 遮罩画成一整块盖在背景图上，跨过状态栏+导航栏；
    分别挂在两个元素上会在交界处切出一条硬边 */
 #chatBg::before,#chatBg::after{content:"";position:absolute;left:0;right:0;pointer-events:none}
-#chatBg::before{top:0;height:118px;background:var(--imm-scrim-top)}
-#chatBg::after{bottom:0;height:132px;background:var(--imm-scrim-bot)}
+/* 遮罩只为了让顶栏文字在浅色壁纸上还看得清，做得很淡、很长，
+   看不出边界 —— 用户不要"一层护栏"，要按钮直接悬浮在画面上 */
+#chatBg::before{top:0;height:180px;background:var(--imm-scrim-top);opacity:.55}
+#chatBg::after{bottom:0;height:200px;background:var(--imm-scrim-bot);opacity:.5}
+#phone.imm.noscrim #chatBg::before,
+#phone.imm.noscrim #chatBg::after{display:none}
 #phone.imm #screens{position:relative;z-index:1}
 #phone.imm #s-chat{background:transparent}
 #phone.imm #statusbar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
@@ -434,6 +438,9 @@ body{background:#0A0A0C;color:var(--text);
 #phone.imm #s-chat .navbar .title em{color:var(--imm-fg);opacity:.85;text-shadow:var(--imm-sh)}
 #phone.imm #chatInputBar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
   border-top:none}
+/* 聊天页设了背景图但没开沉浸：栏透明，让图整块通到底 */
+#s-chat[style*="background-image"] .navbar,
+#s-chat[style*="background-image"] ~ * #chatInputBar{background:transparent}
 #phone.imm #chatInput{background:rgba(255,255,255,.86);border-color:transparent;color:#111;
   -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
 #phone.imm #chatInput::placeholder{color:rgba(0,0,0,.4)}
@@ -496,8 +503,10 @@ body{background:#0A0A0C;color:var(--text);
 #toBottom.show{display:flex}
 #toBottom svg{width:17px;height:17px;stroke:var(--accent);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 #chatInputBar{flex:0 0 auto;display:flex;gap:9px;padding:9px 12px 12px;align-items:flex-end;
-  background:var(--nav);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
-  border-top:.5px solid var(--line)}
+  background:var(--chat-bg);border-top:none}
+/* 非沉浸时顶栏也跟聊天页同底色、不描边 —— 不做出横切画面的那条"护栏" */
+#s-chat .navbar{background:var(--chat-bg);border-bottom:none;
+  -webkit-backdrop-filter:none;backdrop-filter:none}
 #chatInput{flex:1;resize:none;max-height:108px;min-height:38px;padding:8px 15px;background:var(--card);
   border:.5px solid var(--line2);border-radius:19px;color:var(--text);font:inherit;font-size:15.5px;
   outline:none;line-height:1.4}
@@ -2642,6 +2651,29 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 | 「你刚刚才说什么？"怕你拒绝我吧"。你不觉得可笑吗？」 | 拆 3 条，引号完整 | ✅ |
 | `["嗯","在呢","怎么了"]` | 原样 | ✅ |
 
+
+### 2026-09-01（四）· 格式自适应 + 去掉聊天页的"护栏"
+
+**① 消息级的拆/合**（自动兜底之外的手动出口）
+
+长按消息 → 多了两项，按情况出现：
+
+- **拆成 N 条** —— 只在这条真能拆开时才显示，用的是 `splitSentences` 同一套规则
+- **和下一条合并** —— 只在下一条是同一个人发的文本时出现
+
+自动兜底会漏（没有标点的长句、或者判定成"连贯语气"没拆的），手动能补。拆分时第一段占用原消息、其余按 `timestamp+i` 插在后面，顺序不会乱。
+
+**② 去掉顶栏底栏那层"护栏"**
+
+用户描述得很准："那两条把画面切成三段"。查下来有两处：
+
+- 沉浸模式下顶栏底栏本来就是透明的，但 `#chatBg::before/::after` 那两条 118px / 132px 的**遮罩**边界明显 —— 改成 180px / 200px 且透明度降到 .55 / .5，拉长压淡后看不出边界，但文字仍然压得住浅色壁纸
+- 非沉浸模式下顶栏底栏是**实心毛玻璃 + 描边** —— 改成和聊天页同底色、无描边、无 backdrop-filter，按钮直接浮在页面上
+
+另加**「去掉顶底遮罩」开关**（聊天设置 → 聊天背景），背景本身够暗的话可以完全关掉遮罩，画面全通透。
+
+实测截图：背景从状态栏一路通到输入框，中间没有任何横切线。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2776,7 +2808,7 @@ const DEFAULT_CHAT={
   bubbleMe:'', bubbleTa:'', fontSize:15.5,
   chatBg:'', immersive:true, setImmersive:false, showInject:false, historyCount:0,
   histMode:'turn', histTurns:0,
-  journalShare:false, journalRate:20, presetId:'', povEnabled:false, memAuto:true,
+  journalShare:false, journalRate:20, presetId:'', povEnabled:false, memAuto:true, noScrim:false,
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   xdmEnabled:false, xdmRate:15, xdmHours:6,
   avatarRadius:50, textMe:'', textTa:'',
@@ -2884,6 +2916,7 @@ function refreshImm(id){
   const ok=hasImm&&(id==='s-chat'||(id==='s-chatSet'&&cfg.setImmersive));
   document.getElementById('chatBg').style.backgroundImage=ok?`url("${bg}")`:'';
   document.getElementById('phone').classList.toggle('imm',ok);
+  document.getElementById('phone').classList.toggle('noscrim',!!(cfg&&cfg.noScrim));
   if(ok) applyTone(bg); else document.getElementById('phone').classList.remove('lightbg');
   document.getElementById('s-chat').style.backgroundImage=(bg&&!hasImm)?`url("${bg}")`:'';
   if(typeof wxSync==='function') wxSync();
@@ -5763,6 +5796,11 @@ function msgMenu(id){
       {ic:'smile',t:'贴个表情',fn:()=>pickReact(id)},
       {ic:'star',t:(m.fav?'取消收藏':'收藏'),fn:()=>toggleFav(id)}
     ];
+    // 模型偶尔还是会堆一条，给个手动拆的入口；拆过头了也能合回去
+    if(m.type==='text'&&splitSentences(m.content).length>1)
+      acts.push({ic:'select',t:`拆成 ${splitSentences(m.content).length} 条`,fn:()=>splitMsg(id)});
+    if(m.type==='text'&&ms[idx+1]&&ms[idx+1].role===m.role&&ms[idx+1].type==='text')
+      acts.push({ic:'quote',t:'和下一条合并',fn:()=>mergeMsg(id)});
     if(m.role==='assistant'){
       acts.push({ic:'refresh',t:'重新生成这条之后',fn:()=>regenFrom(idx)});
       acts.push({ic:'note',t:'重生成并附加要求',fn:()=>regenWithNote(idx)});
@@ -5773,6 +5811,34 @@ function msgMenu(id){
     acts.push({ic:'trash',t:'删除',danger:true,fn:async()=>{ if(!confirm('删除这条消息？')) return; await dbDel('messages',id); renderChat(false); toast('已删除'); }});
     actionSheet(m.role==='user'?personaOf(c).name:c.name,acts);
   });
+}
+
+/* ---------- 手动拆 / 合 ----------
+   自动兜底会漏（比如没有标点的长句），留个手动出口 */
+async function splitMsg(id){
+  const ms=await msgsOf(curCharId), m=ms.find(x=>x.id===id);
+  if(!m) return;
+  const parts=splitSentences(m.content);
+  if(parts.length<2) return toast('这条拆不开');
+  // 第一段占用原消息，其余按 1ms 递增插在后面，保证顺序
+  m.content=parts[0];
+  await dbPut('messages',m);
+  for(let i=1;i<parts.length;i++)
+    await dbPut('messages',{...m,id:uid(),content:parts[i],
+      timestamp:m.timestamp+i,quote:null,fav:false,react:null});
+  await renderChat(false);
+  toast(`拆成了 ${parts.length} 条`);
+}
+async function mergeMsg(id){
+  const ms=await msgsOf(curCharId);
+  const i=ms.findIndex(x=>x.id===id);
+  const a=ms[i], b=ms[i+1];
+  if(!a||!b||b.role!==a.role) return toast('下面没有同一个人的消息');
+  a.content=String(a.content).trim()+String(b.content).trim();
+  await dbPut('messages',a);
+  await dbDel('messages',b.id);
+  await renderChat(false);
+  toast('已合并');
 }
 
 /* ---------- 撤回 ----------
@@ -6076,6 +6142,12 @@ function renderChatSet(){
       <div class="cell static"><div class="lbl">设置页沉浸模式</div>
         <label class="switch"><input type="checkbox" ${g.setImmersive?'checked':''}
           onchange="setCfg('setImmersive',this.checked)"><i></i></label></div>
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">去掉顶底遮罩</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+          背景本身够暗时打开，画面完全通透</div></div>
+        <label class="switch"><input type="checkbox" ${g.noScrim?'checked':''}
+          onchange="setCfg('noScrim',this.checked,true);refreshImm('s-chatSet')"><i></i></label></div>
       <div class="cell" onclick="setCfg('chatBg','')"><div class="lbl" style="color:var(--danger)">清除背景</div></div>`:''}
     </div>
     ${draftChatBg?`<div class="hint">沉浸模式：背景图通栏铺满，顶栏和输入栏透明浮在图上。<br>设置页沉浸模式下每个分组会变成毛玻璃。</div>`:''}
