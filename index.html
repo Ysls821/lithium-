@@ -423,8 +423,23 @@ body{background:#0A0A0C;color:var(--text);
 /* 遮罩画成一整块盖在背景图上，跨过状态栏+导航栏；
    分别挂在两个元素上会在交界处切出一条硬边 */
 #chatBg::before,#chatBg::after{content:"";position:absolute;left:0;right:0;pointer-events:none}
-#chatBg::before{top:0;height:118px;background:var(--imm-scrim-top)}
-#chatBg::after{bottom:0;height:132px;background:var(--imm-scrim-bot)}
+#chatBg::before{top:0;height:170px;background:var(--imm-scrim-top)}
+#chatBg::after{bottom:0;height:185px;background:var(--imm-scrim-bot)}
+/* 没开沉浸、但设了聊天背景图时，也给上下加同样的渐变蒙层，
+   让顶栏和输入栏区域的文字压得住 —— 纯渐变，不会切出硬边 */
+/* 顶底的模糊蒙层：backdrop-filter 把背景糊掉，再用 mask 让模糊本身渐隐，
+   所以没有硬边 —— 这就是输入栏那种毛玻璃质感，不是压暗的色块。
+   z-index:2 让它盖在气泡之上（气泡滚进去会糊掉，像滑进雾里）。 */
+#chatFrost{position:absolute;left:0;right:0;top:0;height:150px;pointer-events:none;z-index:2;
+  -webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);
+  -webkit-mask-image:linear-gradient(to bottom,#000 34%,transparent);
+  mask-image:linear-gradient(to bottom,#000 34%,transparent)}
+#chatFrostB{position:absolute;left:0;right:0;bottom:0;height:170px;pointer-events:none;z-index:2;
+  -webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);
+  -webkit-mask-image:linear-gradient(to top,#000 42%,transparent);
+  mask-image:linear-gradient(to top,#000 42%,transparent)}
+/* 顶栏和输入栏本身要浮在模糊层之上，否则文字也被糊掉 */
+#s-chat .navbar,#s-chat #chatInputBar,#s-chat #plusPanel{position:relative;z-index:3}
 #phone.imm #screens{position:relative;z-index:1}
 #phone.imm #s-chat{background:transparent}
 #phone.imm #statusbar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
@@ -1556,6 +1571,8 @@ input[type=range]{accent-color:var(--accent)}
         <button id="chatSetBtn" onclick="openChatSet()"><svg width="20" height="5" viewBox="0 0 20 5" fill="currentColor"><circle cx="2.5" cy="2.5" r="2"/><circle cx="10" cy="2.5" r="2"/><circle cx="17.5" cy="2.5" r="2"/></svg></button>
       </div>
       <div class="body" id="chatBody" onscroll="onChatScroll()"></div>
+      <div id="chatFrost"></div>
+      <div id="chatFrostB"></div>
       <div id="injectPill" onclick="showInject()"></div>
       <div id="toBottom" onclick="scrollChatBottom()"><svg viewBox="0 0 17 17"><path d="M8.5 2v13M3 9.5l5.5 5.5L14 9.5"/></svg></div>
       <div id="quoteBar"><span class="q" id="quoteText"></span><span class="x" onclick="clearQuote()">×</span></div>
@@ -2716,6 +2733,26 @@ weatherCv   display:block   top:0  h:643  盖到顶部:true   img:无
 
 实测确认：`天气画布 display:none`、`chatBg 有图:true`，背景图直接铺到状态栏顶部。
 
+
+### 2026-09-01（八）· 回滚顶栏改动，改用模糊蒙层
+
+前面为了"去掉护栏"连改四版（透明化 → 悬浮布局 → isolation → 天气画布），越改越乱，用户要求回滚。按 `6de5ed45`（动顶栏之前）逐块还原了顶栏、输入栏、背景遮罩、toBottom 位置，用 style 段逐行 diff 确认干净。唯一保留的差异是 `wxon → wxlive`（天气没真跑起来时不清空背景图），那条与顶栏无关。
+
+然后重新实现用户真正想要的效果：**模糊蒙层，不是压暗的渐变色块**。
+
+```css
+#chatFrost{
+  backdrop-filter: blur(16px) saturate(140%);
+  mask-image: linear-gradient(to bottom,#000 34%,transparent);
+}
+```
+
+关键是 `backdrop-filter` + `mask` 组合：backdrop-filter 把背景糊掉，mask 让**模糊本身**从实到虚渐隐 —— 所以没有硬边，也不会像色块那样压暗画面。这正是输入栏那种毛玻璃质感。
+
+层级：蒙层 `z-index:2` 盖在气泡之上（气泡滚进去会渐渐糊掉，像滑进雾里），顶栏和输入栏 `z-index:3` 浮在最上面（文字保持锐利）。
+
+实测：中间区域完全清晰，上下渐隐无硬边，顶栏文字和输入框都不受影响。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2728,6 +2765,9 @@ weatherCv   display:block   top:0  h:643  盖到顶部:true   img:无
 
 ## 修过的坑
 
+- **"蒙层"默认理解成了渐变色块** → 用户要的是**模糊**（毛玻璃），我做成了压暗的渐变。两者视觉差别很大：色块会让画面变脏变暗，模糊只是糊开、保留颜色和亮度。做"蒙层"前先确认是 blur 还是 gradient。
+- **渐变蒙层用 z-index:0 会盖住内容** → 想只压背景就得用负值；但如果要盖住内容做"渐隐"效果，就该用正值 + mask。两种做法目标不同，别混。
+- **连改四版没解决就该回滚** → 与其在越堆越复杂的改动上继续打补丁，不如退回已知的干净版本再重来一次。这次回滚后一次就做对了。
 - **改规则时留下旧规则，新逻辑被架空** → 加了 `wxlive` 精确判断，却漏删同选择器的旧 `wxon` 规则，后者继续生效，等于白改。**改 CSS 开关条件时要 grep 一遍同名选择器，确认没有残留。**
 - **空 canvas 是不透明的** → `<canvas>` 即使没画任何东西也会遮住底下的元素，不像空 div 那样透明。用 canvas 做可选图层时，不渲染就必须 `display:none`。
 - **连续猜错四次后才想到枚举** → 与其一版版猜哪个元素在作怪，不如直接把所有同级图层的 display/z-index/位置 dump 出来比对，一次就定位了。**视觉层级问题应该先枚举再动手。**
