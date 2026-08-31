@@ -41,6 +41,15 @@ html{background:#0A0A0C}
 @media (prefers-color-scheme:light){ html{background:#E7E5EF} }
 html,body{height:100%;margin:0;overscroll-behavior:none}
 body.kbup{align-items:flex-start}
+/* 兜底：机身没铺满时，露出来的是 body 自己的底色，不是浏览器的背景。
+   之前绿条就是因为这块交给浏览器画了 */
+body{background:var(--bg)!important}
+@media (prefers-color-scheme:dark){ body{background:#0A0A0C!important} }
+/* 手机上用动态视口高度：键盘弹出时浏览器给的是真实可见高度，
+   比我们自己算准。@supports 保证不支持的浏览器不受影响 */
+@supports (height:100dvh){
+  @media (max-width:439px){ #phone{height:100dvh} }
+}
 body{background:#0A0A0C;color:var(--text);
   font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;display:flex;align-items:center;justify-content:center}
@@ -49,7 +58,7 @@ body{background:#0A0A0C;color:var(--text);
 #phone{width:100%;max-width:400px;height:100%;max-height:868px;background:var(--bg);
   position:relative;overflow:hidden;display:flex;flex-direction:column}
 @media(min-width:440px) and (min-height:900px){
-  #phone{border-radius:46px;box-shadow:0 0 0 2px rgba(255,255,255,.09),0 0 0 11px #16161A,
+  #phone{height:100%;border-radius:46px;box-shadow:0 0 0 2px rgba(255,255,255,.09),0 0 0 11px #16161A,
     0 0 0 12px rgba(0,0,0,.5),0 30px 70px -12px rgba(0,0,0,.55)}
   #island{display:block}
 }
@@ -2452,6 +2461,25 @@ V3 系列：加 sm / sm_dyn
 
 实测「钉住」现在精确贴合可视视口（753×643，position:fixed），另外两档维持原行为。
 
+
+### 2026-08-31（三十二）· 记忆自动回注
+
+**这是和 EVE 之间最后一块实打实的差距。** 扒完 EVE 全部 54821 个字符串后确认：它的「活人感」不来自任何一段神仙提示词，而来自「记忆自动提取 + 回注」这套机制 —— 聊完自动把对话嚼成记忆，下次对话再注回去，角色于是「记得你」。
+
+意外的是本地**提取和回注早就写好了**（`extractMemories` + `memoryText`），缺的只是让它自己跑。所以改动很小：
+
+- `extractMemories` 拆成 **UI 壳 + `runExtract(cid, take)` 核心**，手动按钮和后台共用一份逻辑
+- 新增 `memAutoTick`（90 秒一轮）：每个角色攒够 `memEvery` 条新消息就在后台抽一次记忆，用 `c.memAt` 记住处理到第几条，不重复提取；一轮只处理一个角色，不会一次打一堆 API
+- 设置 → 记忆里加了开关和间隔（默认开，12 条一次）
+
+`runExtract` 内部用 `const memCharId=cid` 局部遮蔽全局同名变量 —— 后台给 A 角色提取时不会误用当前打开的 B 角色。
+
+**顺带加了 EVE 的 system 开场**（就一句）：「你是一个专业的角色扮演者，能够根据角色人设、记忆和你们的关系，生成真实、自然的回复。」放在系统提示最前面定调。
+
+实测链路：造 14 条对话 → 后台自动抽出 3 条记忆（吉他/母亲反对、讨厌香菜、下周三生日）→ 存库 → `buildSystemPrompt` 确认已注回。节流三态（没攒够不跑 / 攒够触发 / 关开关不跑）全部正确。
+
+**绿框第 N 次尝试** — 换思路：不再跟浏览器抢着算高度，改成让页面自己长满。窄屏下 `#phone` 用 `100dvh`（动态视口单位，键盘弹出时浏览器给的就是真实可见高度），并给 `body` 垫一层同色背景兜底——这样任何算不准的缝隙露出的都是页面自己的底色，而不是浏览器的绿。用 `@supports` + `max-width:439px` 双重限定，桌面和不支持 dvh 的浏览器完全不受影响。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2464,6 +2492,7 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **`100dvh` 在内嵌 iframe 里算成 0** → 直接给 `#phone` 加 `height:100dvh` 导致整个界面塌成 0 高。必须用 `@supports (height:100dvh)` 包住，并限定只在窄屏生效，桌面保留 `height:100%`。新的视口单位要给退路。
 - **给用户的开关自己是坏的** → 「钉住」档的生效条件 `kb>80` 在目标浏览器上恒不成立，等于这一档从没跑过。用户三档全试后反馈"都没用"，实际只试了两档，白白多绕一轮。**做成开关的排查手段，每一档都要先验证真的会执行。**
 - **切了模式不立即生效** → 依赖事件回调的逻辑，切换设置时必须主动触发一次，不能等下一个事件。
 - **靠推理修跨浏览器排版问题** → 键盘空隙连猜两版都没中。手上没有目标设备时，与其继续猜，不如把行为做成用户可切换的开关 + 自动采样的诊断，让问题变成可测量的。
@@ -2549,6 +2578,7 @@ const DEFAULT_SETTINGS={
   userName:'我', userPersona:'', timeAware:true, banNarration:true,
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
+  memAuto:true, memEvery:12,
   homeBg:'', homeImm:true, mmCover:'', xposts:[], glassMode:'mix', weather:{mode:'',i:.5,chat:false},
   kbMode:'auto',
   oracle:{mode:'watcher',text:''},
@@ -4495,13 +4525,28 @@ async function delMem(id){
   toast('已删除'); openMemory(memCharId);
 }
 
+/* UI 壳：手动点「从对话中提取」走这里 */
 async function extractMemories(){
   const btn=document.getElementById('memExtract');
-  const c=characters.find(x=>x.id===memCharId);
-  const me=personaOf(c);
   const ms=(await msgsOf(memCharId)).slice(-40);
   if(ms.length<2) return toast('对话太少，先聊几轮');
-  btn.textContent='提取中…'; btn.disabled=true;
+  if(btn){ btn.textContent='提取中…'; btn.disabled=true; }
+  const n=await runExtract(memCharId,40);
+  memories=await dbAll('memories');
+  renderMemory();
+  if(btn){ btn.textContent='从对话中提取'; btn.disabled=false; }
+  toast(n<0?'提取失败':n?`新增 ${n} 条记忆`:'没有发现新的可记内容');
+}
+
+/* 核心：给定角色，从最近 N 条对话里抽记忆存库。返回新增条数，失败返回 -1。
+   手动按钮和后台自动提取共用这一份 */
+async function runExtract(cid,take){
+  const c=characters.find(x=>x.id===cid);
+  if(!c) return -1;
+  const me=personaOf(c);
+  const ms=(await msgsOf(cid)).slice(-(take||40));
+  if(ms.length<2) return 0;
+  const memCharId=cid;   // 下面的模板沿用这个名字
   try{
     const known=memsOf(memCharId).map(m=>'- '+m.content).join('\n')||'（暂无）';
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+m.content).join('\n');
@@ -4545,11 +4590,35 @@ ${convo}
       have.add(content); added++;
     }
     memories=await dbAll('memories');
-    renderMemory();
-    toast(added?`新增 ${added} 条记忆`:'没有发现新的可记内容');
+    return added;
   }catch(e){
-    toast('提取失败：'+e.message);
-    btn.textContent='从对话中提取'; btn.disabled=false;
+    console.warn('记忆提取失败',e);
+    return -1;
+  }
+}
+
+/* ---------- 记忆自动提取 ----------
+   EVE 的"它记得我"就靠这个：聊够一定轮数就在后台把这段对话嚼成记忆，
+   下次对话由 memoryText() 自动注回提示词。用户不用管。 */
+let memAutoBusy=false;
+async function memAutoTick(){
+  if(memAutoBusy||sending||!db||!S.memAuto) return;
+  const every=Math.max(4,+S.memEvery||12);
+  for(const c of characters){
+    const ms=await msgsOf(c.id);
+    if(ms.length<every) continue;
+    const done=c.memAt||0;                    // 上次提取时处理到第几条
+    if(ms.length-done<every) continue;        // 又攒够一批才提
+    memAutoBusy=true;
+    const n=await runExtract(c.id,Math.min(60,ms.length-done+6));
+    if(n>=0){
+      c.memAt=ms.length;
+      await dbPut('characters',c);
+      characters=await dbAll('characters');
+      if(n) toast(`${c.name}：记住了 ${n} 件事`);
+    }
+    memAutoBusy=false;
+    break;                                    // 一轮只处理一个角色
   }
 }
 
@@ -4614,7 +4683,18 @@ function renderSettings(){
         <label class="switch"><input type="checkbox" id="s-mem" ${S.memoryEnabled?'checked':''}><i></i></label></div>
       <div class="field"><label>核心记忆最多带几条</label><input id="s-memcore" type="number" min="0" max="50" value="${S.memCore}"></div>
       <div class="field"><label>情景记忆最多带几条</label><input id="s-memepi" type="number" min="0" max="50" value="${S.memEpisodic}"></div>
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">自动提取记忆</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">聊够一批就在后台记下来</div></div>
+        <label class="switch"><input type="checkbox" ${S.memAuto!==false?'checked':''}
+          onchange="S.memAuto=this.checked;dbPut('settings',S);renderSettings()"><i></i></label></div>
+      ${S.memAuto!==false?`<div class="field"><label>每聊多少条提取一次</label>
+        <input type="number" min="4" max="60" value="${S.memEvery}"
+          oninput="S.memEvery=Math.max(4,parseInt(this.value)||12);dbPut('settings',S)"></div>`:''}
     </div>
+    <div class="hint">开着的话，每聊够一批消息就自动把值得记的事存进记忆库，
+      下次对话自动带上——角色会「记得」你们发生过什么，不用你手动整理。
+      <b>每次提取会消耗一次 API 额度</b>，嫌费就把间隔调大或关掉。</div>
 
     <div class="grouptitle">风格示例</div>
     <div class="group"><div class="field"><textarea id="s-style" style="min-height:118px">${esc(S.styleExamples)}</textarea></div></div>
@@ -9691,7 +9771,9 @@ function buildSystemPrompt(char,history){
   const ps=presetParts(char);
   lastPresetJb=ps.jb;
 
-  let p=`${ps.top?ps.top.trim()+'\n\n':''}# **你的角色与任务**
+  let p=`${ps.top?ps.top.trim()+'\n\n':''}你是一个专业的角色扮演者，能够根据角色人设、记忆和你们的关系，生成真实、自然的回复。
+
+# **你的角色与任务**
 你现在扮演一个名为"${char.name}"的角色。${wb.before}
 
 ## **角色设定:**
@@ -10229,6 +10311,8 @@ async function ensurePersona(){
   setInterval(autoDiaryTick,60000);
   setInterval(journalTick,60000);
   setInterval(journalAutoTick,10*60000);
+  setInterval(memAutoTick,90000);
+  setTimeout(memAutoTick,20000);
   setInterval(xDmTick,7*60000);
   setTimeout(journalAutoTick,8000);
   const ta=document.getElementById('chatInput');
