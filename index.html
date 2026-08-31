@@ -427,6 +427,13 @@ body{background:#0A0A0C;color:var(--text);
 #chatBg::after{bottom:0;height:200px;background:var(--imm-scrim-bot);opacity:.5}
 #phone.imm.noscrim #chatBg::before,
 #phone.imm.noscrim #chatBg::after{display:none}
+/* 排查用：把聊天页上所有叠加图层关掉 */
+#phone.bare #chatBg::before,#phone.bare #chatBg::after{display:none!important}
+#phone.bare #weatherCv{display:none!important}
+#phone.bare #s-chat *{box-shadow:none!important;
+  -webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+#phone.bare #s-chat .navbar,#phone.bare #chatInputBar{
+  background:transparent!important;border:none!important}
 #phone.imm #screens{position:relative;z-index:1}
 #phone.imm #s-chat{background:transparent}
 #phone.imm #statusbar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
@@ -438,9 +445,7 @@ body{background:#0A0A0C;color:var(--text);
 #phone.imm #s-chat .navbar .title em{color:var(--imm-fg);opacity:.85;text-shadow:var(--imm-sh)}
 #phone.imm #chatInputBar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
   border-top:none}
-/* 聊天页设了背景图但没开沉浸：栏透明，让图整块通到底 */
-#s-chat[style*="background-image"] .navbar,
-#s-chat[style*="background-image"] ~ * #chatInputBar{background:transparent}
+
 #phone.imm #chatInput{background:rgba(255,255,255,.86);border-color:transparent;color:#111;
   -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
 #phone.imm #chatInput::placeholder{color:rgba(0,0,0,.4)}
@@ -3142,6 +3147,18 @@ function initKeyboardFix(){
 /* 键盘对不上时用这个看真实数值，省得靠猜。
    注意：这个入口在设置页，点的时候键盘一定是关的 —— 所以关键是 kbLog 里
    自动记下的历史，里面才有键盘弹起那一刻的数 */
+/* 聊天页出现说不清的线条/色块时，一键把所有叠加层关掉，逐个排除 */
+function chatBare(){
+  const p=document.getElementById('phone');
+  const on=!p.classList.contains('bare');
+  p.classList.toggle('bare',on);
+  if(on){ // 顺手停掉天气和 WebGL 玻璃，它们也可能在聊天页留下渲染痕迹
+    if(typeof wxRaf!=='undefined'&&wxRaf){ cancelAnimationFrame(wxRaf); wxRaf=0; }
+    p.classList.remove('wxon');
+    if(typeof lgTeardown==='function') lgTeardown();
+  } else if(typeof wxSync==='function') wxSync();
+  toast(on?'已关掉所有叠加层，看线还在不在':'恢复了');
+}
 function kbDiag(){
   const vv=window.visualViewport;
   const p=document.getElementById('phone').getBoundingClientRect();
@@ -6292,6 +6309,10 @@ function renderChatSet(){
     <div class="secband">管理</div>
     <div class="grouptitle">调试</div>
     <div class="group">
+      <div class="cell" onclick="chatBare();show('s-chat');renderChat(false)">
+        <div class="main" style="flex:1;min-width:0"><div class="lbl">聊天页极简（排查用）</div>
+          <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+            关掉遮罩/阴影/毛玻璃/天气层，看怪线还在不在</div></div>${CHEV}</div>
       <div class="cell static"><div class="lbl">显示注入管理器</div>
         <label class="switch"><input type="checkbox" ${g.showInject?'checked':''}
           onchange="setCfg('showInject',this.checked,true);updateInjectPill()"><i></i></label></div>
