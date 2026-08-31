@@ -423,8 +423,8 @@ body{background:#0A0A0C;color:var(--text);
 #chatBg::before,#chatBg::after{content:"";position:absolute;left:0;right:0;pointer-events:none}
 /* 遮罩只为了让顶栏文字在浅色壁纸上还看得清，做得很淡、很长，
    看不出边界 —— 用户不要"一层护栏"，要按钮直接悬浮在画面上 */
-#chatBg::before{top:0;height:180px;background:var(--imm-scrim-top);opacity:.55}
-#chatBg::after{bottom:0;height:200px;background:var(--imm-scrim-bot);opacity:.5}
+/* 顶底的压暗改由 navbar/inputBar 自己的渐变蒙层负责，这里不再叠一层 */
+#chatBg::before,#chatBg::after{display:none}
 #phone.imm.noscrim #chatBg::before,
 #phone.imm.noscrim #chatBg::after{display:none}
 /* 排查用：把聊天页上所有叠加图层关掉 */
@@ -455,7 +455,7 @@ body{background:#0A0A0C;color:var(--text);
 #phone.imm .reacts span{border-color:transparent}
 #phone.imm #homebar{color:var(--imm-fg)}
 
-#chatBody{padding:14px 14px 8px;display:flex;flex-direction:column;gap:9px}
+#chatBody{padding:14px 14px 10px;display:flex;flex-direction:column;gap:9px}
 .loadmore{align-self:center;margin:2px 0 10px;padding:6px 16px;border-radius:20px;background:var(--card);
   color:var(--accent);font-size:13px;box-shadow:var(--shadow-s);cursor:pointer}
 .msg{display:flex;gap:8px;align-items:flex-end;animation:pop .24s cubic-bezier(.3,1.3,.6,1);
@@ -502,16 +502,44 @@ body{background:#0A0A0C;color:var(--text);
   color:var(--accent);line-height:12px;margin-top:1px;height:12px}
 .navbar .title b{display:block;font-weight:600;line-height:16px}
 
-#toBottom{position:absolute;right:14px;bottom:74px;width:38px;height:38px;border-radius:50%;
+#toBottom{position:absolute;right:14px;bottom:88px;width:38px;height:38px;border-radius:50%;
   background:var(--card);box-shadow:0 3px 12px rgba(0,0,0,.18);display:none;align-items:center;
   justify-content:center;cursor:pointer;z-index:6}
 #toBottom.show{display:flex}
 #toBottom svg{width:17px;height:17px;stroke:var(--accent);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 #chatInputBar{flex:0 0 auto;display:flex;gap:9px;padding:9px 12px 12px;align-items:flex-end;
-  background:var(--chat-bg);border-top:none}
+  background:transparent;border-top:none}
 /* 非沉浸时顶栏也跟聊天页同底色、不描边 —— 不做出横切画面的那条"护栏" */
-#s-chat .navbar{background:var(--chat-bg);border-bottom:none;
-  -webkit-backdrop-filter:none;backdrop-filter:none}
+/* 聊天页的顶栏和底栏是"浮"在内容之上的，不占位。
+   气泡因此能一直滚到屏幕边缘，不会被栏切掉半截；
+   body 用 padding 让出等高的空间，保证最后一条能完整停在栏前面。 */
+#s-chat .navbar{background:transparent;border-bottom:none;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  position:absolute;top:0;left:0;right:0;z-index:12}
+#s-chat #chatInputBar{position:absolute;left:0;right:0;bottom:0;z-index:12}
+#s-chat #plusPanel{position:absolute;left:0;right:0;bottom:0;z-index:11}
+#s-chat .body{padding-top:46px;padding-bottom:64px}
+/* 展开 + 面板时，底部要让出更多 */
+#s-chat #plusPanel.open ~ .body{padding-bottom:0}
+/* 渐变蒙层：垫在顶栏/底栏底下，从透明过渡到底色。
+   气泡滚过去是"淡入雾里"，不是被一条硬边切断 —— 这是关键，
+   用户明确说可以有蒙层，但不要横切画面。 */
+#s-chat .navbar::before,#s-chat #chatInputBar::before{
+  content:"";position:absolute;left:0;right:0;pointer-events:none;z-index:-1}
+#s-chat .navbar::before{top:0;height:150%;
+  background:linear-gradient(to bottom,var(--chat-bg) 30%,transparent)}
+#s-chat #chatInputBar::before{bottom:0;height:190%;
+  background:linear-gradient(to top,var(--chat-bg) 42%,transparent)}
+/* 沉浸模式下用半透明深色，让壁纸仍然透出来 */
+#phone.imm #s-chat .navbar::before{
+  background:linear-gradient(to bottom,rgba(10,10,16,.62) 26%,transparent)}
+#phone.imm #s-chat #chatInputBar::before{
+  background:linear-gradient(to top,rgba(10,10,16,.66) 40%,transparent)}
+#phone.imm.lightbg #s-chat .navbar::before{
+  background:linear-gradient(to bottom,rgba(245,245,250,.62) 26%,transparent)}
+#phone.imm.lightbg #s-chat #chatInputBar::before{
+  background:linear-gradient(to top,rgba(245,245,250,.66) 40%,transparent)}
+#phone.bare #s-chat .navbar::before,#phone.bare #s-chat #chatInputBar::before{display:none}
 #chatInput{flex:1;resize:none;max-height:108px;min-height:38px;padding:8px 15px;background:var(--card);
   border:.5px solid var(--line2);border-radius:19px;color:var(--text);font:inherit;font-size:15.5px;
   outline:none;line-height:1.4}
@@ -2679,6 +2707,21 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 
 实测截图：背景从状态栏一路通到输入框，中间没有任何横切线。
 
+
+### 2026-09-01（五）· 消息被顶底栏切掉
+
+我一直把用户说的"护栏"理解成"分割线"，改了两版都没对。她圈图之后才明白：**问题是最后一条消息被输入栏切掉半截**，不是有条线。
+
+根因：`#s-chat` 是 flex 竖排，`navbar / body / chatInputBar` 是并排的兄弟节点。上一版我把顶栏底栏改成透明，**但它们仍然占位** —— 视觉上像背景的一部分，气泡滚到那儿就像被凭空切断。
+
+**改法**：顶栏、底栏、+面板全部 `position:absolute` 脱离文档流真正悬浮，`.body` 用 `padding-top:46px / padding-bottom:64px` 让出等高空间。这样气泡能一直滚到屏幕边缘，最后一条也能完整停在栏前面。
+
+**渐变蒙层**（用户补充："可以有蒙层，但不要横切"）：蒙层从压在背景上的 `#chatBg::before/::after` 挪到 `navbar::before / chatInputBar::before`，改成 `linear-gradient` 从底色渐变到透明。气泡滚过去是"淡入雾里"，不是被一条硬边截断。沉浸模式下用半透明深色（浅色壁纸时自动换浅色版），壁纸依然透得出来。`bare` 排查模式下整个关掉。
+
+实测滚到底：最后一条完整可见，距输入栏 4px 余量。
+
+顺带删掉上一版写错的选择器 `#s-chat[style*="background-image"] ~ * #chatInputBar` —— `#chatInputBar` 在 `#s-chat` **内部**，不是兄弟节点，`~` 用错了。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2691,6 +2734,8 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 
 ## 修过的坑
 
+- **把"透明"当成"不占位"** → 顶栏底栏改 `background:transparent` 后仍然占据 flex 空间，内容滚到那里被截断，看起来像凭空多了一条边界。要真悬浮必须 `position:absolute` + 给内容容器等高 padding。
+- **反复照着自己的理解改，而不是先问清楚现象** → 用户说"护栏"，我按"分割线"改了两版都不对，她圈图后才发现是"消息被切掉"。**描述有歧义时，先让对方指出来，比连改两版省事。**
 - **加长上下文会顺带削弱格式遵循** → 历史从 30 条涨到 130 条后，开头的格式规则被冲淡，模型开始堆一条。**扩上下文窗口时要同步把格式约束往末尾挪**，离生成越近越有效。
 - **按换行拆不够** → 模型堆一条时通常没有换行，是「A。B。C。」。兜底得按句拆，但要避开引号内、括号描写、和正常的短句语气。
 - **上下文窗口按"条"算，对连发型角色等于砍掉大半** → 角色一次连发 8-10 条时，"30 条历史"只有 2.6 轮。**凡是"最近 N 条"的窗口，都要先问清楚一条是多大的单位**；对话类的正确单位是轮，不是条。
