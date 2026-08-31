@@ -517,11 +517,16 @@ body{background:#0A0A0C;color:var(--text);
   -webkit-backdrop-filter:none;backdrop-filter:none;
   position:absolute;top:0;left:0;right:0;z-index:12}
 #s-chat .navbar>*,#s-chat #chatInputBar>*{position:relative;z-index:1}
+#s-chat .navbar,#s-chat #chatInputBar{isolation:isolate}
 #s-chat #chatInputBar{position:absolute;left:0;right:0;bottom:0;z-index:12}
 #s-chat #plusPanel{position:absolute;left:0;right:0;bottom:0;z-index:11}
 /* body 必须显式压到栏下面：不给层级的话，气泡（带阴影/变换）
    在部分浏览器会浮到 absolute 定位的栏之上，出现文字盖住顶栏的现象 */
-#s-chat .body{padding-top:46px;padding-bottom:64px;position:relative;z-index:1}
+/* isolation 把整个滚动区封成独立的层叠上下文 ——
+   .msg 带 animation/transform 会自建层叠上下文并提升为合成层，
+   光给 .body 设 z-index 拦不住，气泡照样能飘到顶栏之上。 */
+#s-chat .body{padding-top:46px;padding-bottom:64px;
+  position:relative;z-index:1;isolation:isolate}
 /* 展开 + 面板时，底部要让出更多 */
 #s-chat #plusPanel.open ~ .body{padding-bottom:0}
 /* 渐变蒙层：垫在顶栏/底栏底下，从透明过渡到底色。
