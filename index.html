@@ -203,7 +203,6 @@ body{background:#0A0A0C;color:var(--text);
 #phone.himm.wxlive #weatherCv,#phone.imm.wxlive #weatherCv{display:block}
 #phone.himm.wxlive #homeBg{background-image:none!important}
 /* 聊天页同步：天气画布替掉 chatBg 的图，遮罩(::before/::after)留在上面 */
-#phone.imm.wxon #weatherCv{display:block}
 /* 只有天气画布真的在渲染（wxlive）时才让它接管背景；
    否则保留 chatBg 的图，避免天气没跑起来时顶部露出一条纯色带 */
 #phone.imm.wxlive #chatBg{background-image:none!important}
@@ -433,6 +432,9 @@ body{background:#0A0A0C;color:var(--text);
 /* 排查用：把聊天页上所有叠加图层关掉 */
 #phone.bare #chatBg::before,#phone.bare #chatBg::after{display:none!important}
 #phone.bare #weatherCv{display:none!important}
+/* 保险：只要没在真正渲染，画布一律不显示 —— 空 canvas 是不透明的，
+   会盖住 chatBg，顶部就露出一条纯色带 */
+#phone:not(.wxlive) #weatherCv{display:none!important}
 #phone.bare #s-chat *{box-shadow:none!important;
   -webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 #phone.bare #s-chat .navbar,#phone.bare #chatInputBar{
@@ -2749,6 +2751,23 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 
 **顺带修的层叠问题**：`.msg` 带 `animation:pop` 和 `transform`，会自建层叠上下文并提升成合成层，光给 `.body` 设 `z-index:1` 拦不住，气泡能飘到顶栏之上。用 `isolation:isolate` 把整个滚动区封成独立层叠上下文。
 
+
+### 2026-09-01（七）· 纯色带真凶：空白的天气画布
+
+停止猜测，改成把 `#phone` 的所有直接子元素逐个 dump 出来（display / z-index / 位置 / 是否盖到顶部）。一眼看到：
+
+```
+weatherCv   display:block   top:0  h:643  盖到顶部:true   img:无
+```
+
+**天气画布是 `display:block`、铺满整个机身、但没有在渲染。** 空 canvas 是不透明的，它盖在 `chatBg` 上面 —— 状态栏那条"纯色带"就是这块空白画布。
+
+而且是我上一版没删干净留下的：加了 `wxlive` 判断，却漏删了旧的 `#phone.imm.wxon #weatherCv{display:block}`，旧规则把新判断完全架空了。
+
+**改法**：删掉那条残留规则，并加一道保险 `#phone:not(.wxlive) #weatherCv{display:none!important}` —— 只要不是真的在渲染，画布一律不显示。
+
+实测确认：`天气画布 display:none`、`chatBg 有图:true`，背景图直接铺到状态栏顶部。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2761,6 +2780,9 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 
 ## 修过的坑
 
+- **改规则时留下旧规则，新逻辑被架空** → 加了 `wxlive` 精确判断，却漏删同选择器的旧 `wxon` 规则，后者继续生效，等于白改。**改 CSS 开关条件时要 grep 一遍同名选择器，确认没有残留。**
+- **空 canvas 是不透明的** → `<canvas>` 即使没画任何东西也会遮住底下的元素，不像空 div 那样透明。用 canvas 做可选图层时，不渲染就必须 `display:none`。
+- **连续猜错四次后才想到枚举** → 与其一版版猜哪个元素在作怪，不如直接把所有同级图层的 display/z-index/位置 dump 出来比对，一次就定位了。**视觉层级问题应该先枚举再动手。**
 - **"已配置"和"真的在运行"当成一回事** → `wxon` 只表示用户开了天气，不代表画布真在渲染。拿它去 `!important` 清掉备用背景，一旦渲染没起来就露底。**凡是"A 接管 B"的切换，判断条件必须是"A 真的работает"，不能是"A 被配置了"。**
 - **改了三版都没问到真正的现象** → 用户说"护栏"，我依次理解成分割线、消息被切、气泡盖顶栏，全不是。真相是状态栏露底色。**同一个描述连续改错两次以上，就该停下来要一张标注图，而不是继续猜。**
 - **把"透明"当成"不占位"** → 顶栏底栏改 `background:transparent` 后仍然占据 flex 空间，内容滚到那里被截断，看起来像凭空多了一条边界。要真悬浮必须 `position:absolute` + 给内容容器等高 padding。
