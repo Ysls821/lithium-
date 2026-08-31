@@ -430,10 +430,14 @@ body{background:#0A0A0C;color:var(--text);
 /* 顶底的模糊蒙层：backdrop-filter 把背景糊掉，再用 mask 让模糊本身渐隐，
    所以没有硬边 —— 这就是输入栏那种毛玻璃质感，不是压暗的色块。
    z-index:2 让它盖在气泡之上（气泡滚进去会糊掉，像滑进雾里）。 */
-#chatFrostB{position:absolute;left:0;right:0;bottom:0;height:170px;pointer-events:none;z-index:2;
-  -webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);
-  -webkit-mask-image:linear-gradient(to top,#000 42%,transparent);
-  mask-image:linear-gradient(to top,#000 42%,transparent)}
+/* 底栏蒙层：只糊一点点、很矮、边缘长距离渐隐。
+   blur 从 16px 降到 7px —— 之前太"厚"，字会看不清；
+   高度 170→96px；mask 的实心段从 42% 收到 18%，剩下 82% 都在渐隐，
+   所以边缘过渡很柔，看不出蒙层从哪里开始。 */
+#chatFrostB{position:absolute;left:0;right:0;bottom:0;height:96px;pointer-events:none;z-index:2;
+  -webkit-backdrop-filter:blur(7px) saturate(115%);backdrop-filter:blur(7px) saturate(115%);
+  -webkit-mask-image:linear-gradient(to top,#000 18%,rgba(0,0,0,.55) 48%,transparent 100%);
+  mask-image:linear-gradient(to top,#000 18%,rgba(0,0,0,.55) 48%,transparent 100%)}
 /* 输入栏要浮在底部模糊层之上，否则文字也被糊掉。顶栏维持原样，不参与 */
 #s-chat #chatInputBar,#s-chat #plusPanel{position:relative;z-index:3}
 #phone.imm #screens{position:relative;z-index:1}
