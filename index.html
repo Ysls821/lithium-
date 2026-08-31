@@ -196,15 +196,18 @@ body{background:#0A0A0C;color:var(--text);
   --imm-scrim-bot:linear-gradient(0deg,rgba(255,255,255,.58) 0%,rgba(255,255,255,.34) 44%,rgba(255,255,255,.1) 78%,transparent 100%);
 }
 #chatBg{position:absolute;inset:0;z-index:0;display:none;background-size:cover;background-position:center}
+/* 状态栏那 46px 也要盖到 —— 否则沉浸时顶上会露出一条纯色带 */
 #phone.imm #chatBg{display:block}
 #homeBg{position:absolute;inset:0;z-index:0;display:none;background-size:cover;background-position:center}
 #weatherCv{position:absolute;inset:0;z-index:0;display:none;width:100%;height:100%}
-#phone.himm.wxon #weatherCv{display:block}
-#phone.himm.wxon #homeBg{background-image:none!important}
+#phone.himm.wxlive #weatherCv,#phone.imm.wxlive #weatherCv{display:block}
+#phone.himm.wxlive #homeBg{background-image:none!important}
 /* 聊天页同步：天气画布替掉 chatBg 的图，遮罩(::before/::after)留在上面 */
 #phone.imm.wxon #weatherCv{display:block}
-#phone.imm.wxon #chatBg{background-image:none!important}
-#phone.imm.wxon #chatBg::before,#phone.imm.wxon #chatBg::after{z-index:1}
+/* 只有天气画布真的在渲染（wxlive）时才让它接管背景；
+   否则保留 chatBg 的图，避免天气没跑起来时顶部露出一条纯色带 */
+#phone.imm.wxlive #chatBg{background-image:none!important}
+#phone.imm.wxlive #chatBg::before,#phone.imm.wxlive #chatBg::after{z-index:1}
 #homeBg::before{content:"";position:absolute;inset:0;pointer-events:none;
   background:linear-gradient(rgba(20,18,34,.30),rgba(20,18,34,.12) 30%,rgba(20,18,34,.34))}
 #phone.himm #homeBg{display:block}
@@ -2730,6 +2733,22 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 
 顺带删掉上一版写错的选择器 `#s-chat[style*="background-image"] ~ * #chatInputBar` —— `#chatInputBar` 在 `#s-chat` **内部**，不是兄弟节点，`~` 用错了。
 
+
+### 2026-09-01（六）· "护栏"的真凶：状态栏那条纯色带
+
+用户从头到尾说的"护栏"，最后定位到是**状态栏区域那 46px 露出机身底色**，形成一条横贯屏幕的纯色带，把壁纸切成两截。我前面一直在改 navbar 和 inputBar，方向就错了。
+
+根因是两个 bug 叠一起：
+
+1. **天气画布在聊天页沉浸下压根没显示** —— 规则只写了 `#phone.himm.wxon #weatherCv{display:block}`（首页沉浸），聊天页沉浸 `imm` 时天气画布是 `display:none`
+2. **但 `#chatBg` 的背景图已经被 `!important` 清掉了** —— `#phone.imm.wxon #chatBg{background-image:none!important}`
+
+于是：配置了天气 → chatBg 的图被清空 → 天气画布又不显示 → 状态栏后面什么都没有 → 露出机身底色。
+
+**改法**：区分"配置了天气"（`wxon`）和"天气真的在画"（`wxlive`）。只有 `wxFrame` 成功画出一帧后才加 `wxlive`，也只有 `wxlive` 时才让天气接管背景、清空 `chatBg`。天气没跑起来（初始化失败、图还没解码、被 stop）时，`chatBg` 的图完整保留。同时补上聊天页沉浸时天气画布的显示规则。
+
+**顺带修的层叠问题**：`.msg` 带 `animation:pop` 和 `transform`，会自建层叠上下文并提升成合成层，光给 `.body` 设 `z-index:1` 拦不住，气泡能飘到顶栏之上。用 `isolation:isolate` 把整个滚动区封成独立层叠上下文。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2742,6 +2761,8 @@ AI 每次连发：平均 8.7 条，中位 8，最多 37 条
 
 ## 修过的坑
 
+- **"已配置"和"真的在运行"当成一回事** → `wxon` 只表示用户开了天气，不代表画布真在渲染。拿它去 `!important` 清掉备用背景，一旦渲染没起来就露底。**凡是"A 接管 B"的切换，判断条件必须是"A 真的работает"，不能是"A 被配置了"。**
+- **改了三版都没问到真正的现象** → 用户说"护栏"，我依次理解成分割线、消息被切、气泡盖顶栏，全不是。真相是状态栏露底色。**同一个描述连续改错两次以上，就该停下来要一张标注图，而不是继续猜。**
 - **把"透明"当成"不占位"** → 顶栏底栏改 `background:transparent` 后仍然占据 flex 空间，内容滚到那里被截断，看起来像凭空多了一条边界。要真悬浮必须 `position:absolute` + 给内容容器等高 padding。
 - **反复照着自己的理解改，而不是先问清楚现象** → 用户说"护栏"，我按"分割线"改了两版都不对，她圈图后才发现是"消息被切掉"。**描述有歧义时，先让对方指出来，比连改两版省事。**
 - **加长上下文会顺带削弱格式遵循** → 历史从 30 条涨到 130 条后，开头的格式规则被冲淡，模型开始堆一条。**扩上下文窗口时要同步把格式约束往末尾挪**，离生成越近越有效。
@@ -7495,17 +7516,20 @@ function wxFrame(){
   gl.uniform1i(pr.u.u_hasBg,hasBg);
   gl.uniform1f(pr.u.u_bgAspect,wxAspect);
   gl.drawArrays(gl.TRIANGLES,0,3);
+  document.getElementById('phone').classList.add('wxlive');   // 真画出来了才让它接管背景
   wxRaf=requestAnimationFrame(wxFrame);
 }
 function wxStop(){
   if(wxRaf){ cancelAnimationFrame(wxRaf); wxRaf=0; }
-  document.getElementById('phone').classList.remove('wxon');
+  document.getElementById('phone').classList.remove('wxon','wxlive');
 }
 function wxSync(){
   const on=wxActive();
   document.getElementById('phone').classList.toggle('wxon',!!wxSrcNow());
   if(on){ if(!wxRaf) wxRaf=requestAnimationFrame(wxFrame); }
-  else if(wxRaf){ cancelAnimationFrame(wxRaf); wxRaf=0; }
+  else if(wxRaf){ cancelAnimationFrame(wxRaf); wxRaf=0;
+    document.getElementById('phone').classList.remove('wxlive'); }
+  if(!on) document.getElementById('phone').classList.remove('wxlive');
 }
 document.addEventListener('visibilitychange',()=>wxSync());
 
