@@ -1628,6 +1628,12 @@ input[type=range]{accent-color:var(--accent)}
       <div class="body" id="liBody"></div>
     </div>
 
+    <div class="screen overlay" id="s-eve">
+      <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>从 EVE 导入</b></div>
+        <div class="sp"></div></div>
+      <div class="body" id="eveBody"></div>
+    </div>
+
     <div class="screen overlay" id="s-oracleSet">
       <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>旁白人设</b></div>
         <div class="sp"></div></div>
@@ -2480,6 +2486,37 @@ V3 系列：加 sm / sm_dyn
 
 **绿框第 N 次尝试** — 换思路：不再跟浏览器抢着算高度，改成让页面自己长满。窄屏下 `#phone` 用 `100dvh`（动态视口单位，键盘弹出时浏览器给的就是真实可见高度），并给 `body` 垫一层同色背景兜底——这样任何算不准的缝隙露出的都是页面自己的底色，而不是浏览器的绿。用 `@supports` + `max-width:439px` 双重限定，桌面和不支持 dvh 的浏览器完全不受影响。
 
+
+### 2026-08-31（三十三）· 从 EVE 导入
+
+设置 → 数据 → **从 EVE 导入**。选 EVE 导出的 .json，挑角色，拉滑杆决定导多少条聊天记录。
+
+**为什么不全导**：用户那份备份是 136MB、8.8 万条消息（姬照一个人就 7 万条，跨度 7/8–8/29）。全塞进 IndexedDB 会卡死，而模型每次只读最近几十条，前面几万条纯占地方。所以默认导最近 600 条，滑杆可调 0–3000。
+
+**字段映射**（EVE → 小手机）：
+
+| EVE | 小手机 |
+|---|---|
+| `sender: sent/received` | `role: user/assistant` |
+| `voice_message` | `type:'voice'`，时长按字数估 |
+| `transfer` + `amount`/`note` | `type:'transfer'` |
+| `location` + `locationName` | `type:'location'` |
+| `ai_image` / `user_photo` | `type:'fake'`（图片描述卡） |
+| `isEmoji` + `emojiDescription` | `type:'sticker'` |
+| `recalled_message` | `recalled:true` + 保留原文 |
+| `call_record` / `companion_start` 等系统提示 | 丢弃（噪音） |
+| 记忆 `importance` 0~1 | 换算成 1~5 星 |
+
+**支持并入已有角色** —— 已经在小手机里建过这个角色的，选「并入」，历史接到现有对话前面，不用重开一个。
+
+**记忆默认不导**（开关可开）——多数人已经手动导过，重复导会翻倍。
+
+导入后把 `c.memAt` 设成消息数，避免自动提取又把这批老对话重嚼一遍。
+
+坑：EVE 有 91 条消息的 `content` 不是字符串而是多模态数组 `[{type:'text',text:'…'}]`（带图时的 OpenAI 格式），直接当字符串用会渲染成 `[object Object]`。加了 `eveText()` 统一展开，所有取 content 的地方都过一遍。
+
+实测：真实备份切 400 条样本导入，`[object Object]` 归零，文字/语音/图片/表情四种类型全部正确还原，人设 1718 字完整带入。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2492,6 +2529,7 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **导入外部数据时假设字段都是字符串** → EVE 的 `content` 有 91 条是多模态数组，直接塞进 innerHTML 渲染成 `[object Object]`。导别人的数据前先统计一遍每个字段的实际类型分布，别看头两条就下结论。
 - **`100dvh` 在内嵌 iframe 里算成 0** → 直接给 `#phone` 加 `height:100dvh` 导致整个界面塌成 0 高。必须用 `@supports (height:100dvh)` 包住，并限定只在窄屏生效，桌面保留 `height:100%`。新的视口单位要给退路。
 - **给用户的开关自己是坏的** → 「钉住」档的生效条件 `kb>80` 在目标浏览器上恒不成立，等于这一档从没跑过。用户三档全试后反馈"都没用"，实际只试了两档，白白多绕一轮。**做成开关的排查手段，每一档都要先验证真的会执行。**
 - **切了模式不立即生效** → 依赖事件回调的逻辑，切换设置时必须主动触发一次，不能等下一个事件。
@@ -3389,6 +3427,209 @@ function exportPreset(){
   a.href=URL.createObjectURL(new Blob([JSON.stringify(draftPreset,null,2)],{type:'application/json'}));
   a.download=(draftPreset.name||'preset')+'.json'; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+/* ============================================================
+   从 EVE 备份导入
+   EVE 导出的是一整个库的快照（characters / chatMessages / coreMemories …）。
+   7 万条原始消息全塞进 IndexedDB 会卡死，而且模型每次只读最近几十条 ——
+   真正让角色"记得你"的是记忆表。所以：记忆全导，聊天记录只导最近 N 条。
+   ============================================================ */
+let eveData=null, evePick=null, eveTake=600, eveMem=false, eveInto='';
+
+function openEve(){ goTo('s-eve',renderEve); }
+
+function pickEveFile(){
+  const i=document.createElement('input');
+  i.type='file'; i.accept='.json,application/json';
+  i.onchange=async()=>{
+    const f=i.files[0]; if(!f) return;
+    toast('读取中…这个文件可能很大');
+    try{
+      const txt=await f.text();
+      const j=JSON.parse(txt);
+      if(!j.chatMessages||!j.characters) throw new Error('不像 EVE 的备份文件');
+      eveData=j; evePick=null;
+      renderEve();
+      toast(`读到 ${j.characters.length} 个角色、${j.chatMessages.length} 条消息`);
+    }catch(e){ toast('读取失败：'+e.message); }
+  };
+  i.click();
+}
+
+/* EVE 里有的 content 不是字符串，而是多模态数组 [{type:'text',text:'…'},{type:'image_url'…}] */
+function eveText(v){
+  if(v==null) return '';
+  if(typeof v==='string') return v;
+  if(Array.isArray(v))
+    return v.map(x=>typeof x==='string'?x:(x&&(x.text||x.content)||'')).filter(Boolean).join('');
+  if(typeof v==='object') return String(v.text||v.content||'');
+  return String(v);
+}
+/* EVE 的一条消息 -> 小手机的消息 */
+function eveMsg(m,cid){
+  const md=m.messageData||{};
+  const role=md.sender==='sent'?'user':'assistant';
+  const t=md.type||'';
+  const base={id:'eve_'+(md.id||m.id),characterId:cid,role,
+    timestamp:m.timestamp||md.timestamp||Date.now(),meta:{}};
+  // 系统提示类（撤回提示、通话记录、邀请…）统一转成本地的"系统行"
+  if(md.sender==='system'){
+    if(t==='recalled_message')
+      return {...base,role:'assistant',type:'text',
+        content:eveText(md.originalContent)||eveText(md.content),
+        recalled:true,recalledAt:base.timestamp};
+    return null;   // 通话记录/邀请这类提示不导，避免噪音
+  }
+  if(t==='voice_message'){ const vc=eveText(md.content);
+    return {...base,type:'voice',content:vc,meta:{dur:Math.max(1,Math.round(vc.length/3.6))}}; }
+  if(t==='transfer') return {...base,type:'transfer',content:eveText(md.note)||eveText(md.content)||'转账',
+    meta:{amount:+md.amount||0,status:'pending'}};
+  if(t==='location') return {...base,type:'location',content:md.locationName||'位置',
+    meta:{addr:md.coordinates||''}};
+  if(t==='ai_image'||t==='user_photo')
+    return {...base,type:'fake',
+      content:eveText(md.imageDescription)||eveText(md.photoDescription)||eveText(md.content)};
+  if(md.isEmoji&&md.emojiDescription)
+    return {...base,type:'sticker',content:md.emojiDescription,meta:{}};
+  const c=eveText(md.content).trim();
+  if(!c) return null;
+  return {...base,type:'text',content:c};
+}
+
+function renderEve(){
+  const box=document.getElementById('eveBody');
+  if(!eveData){
+    box.innerHTML=`
+      <div class="grouptitle">选择备份文件</div>
+      <button class="btn ghost" onclick="pickEveFile()">选择 EVE 导出的 .json</button>
+      <div class="hint">在 EVE 里导出的完整备份。文件可能有一百多 MB，读取要等几秒。</div>
+      <div class="grouptitle">会导入什么</div>
+      <div class="group"><div class="field">
+        <div style="font-size:13.5px;line-height:1.9;color:var(--sub)">
+        · <b style="color:var(--text)">角色</b>：名字、人设、头像<br>
+        · <b style="color:var(--text)">记忆</b>：核心记忆 + 情景记忆<b>全部导入</b><br>
+        · <b style="color:var(--text)">聊天记录</b>：最近 N 条（可选）<br>
+        · 文字 / 语音 / 转账 / 位置 / 图片描述 / 撤回都会还原
+        </div></div></div>
+      <div class="hint">EVE 的记忆重要度是 0~1，会换算成小手机的 1~5 星。</div>
+      <div style="height:20px"></div>`;
+    return;
+  }
+  const chars=eveData.characters||[];
+  const cnt={};
+  for(const m of eveData.chatMessages||[]) cnt[m.characterId]=(cnt[m.characterId]||0)+1;
+  const memN=c=>(eveData.coreMemories||[]).filter(x=>x.characterId===c).length
+               +(eveData.episodicMemories||[]).filter(x=>x.characterId===c).length;
+  box.innerHTML=`
+    <div class="grouptitle">选一个角色</div>
+    <div class="group">${chars.map(c=>`
+      <div class="cell" onclick="eveSel('${c.id}')">
+        <span class="ck ${evePick===c.id?'on':''}"></span>
+        <div class="main" style="flex:1;min-width:0">
+          <div class="lbl">${esc(c.name)}</div>
+          <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+            ${cnt[c.id]||0} 条消息 · ${memN(c.id)} 条记忆</div>
+        </div></div>`).join('')}
+    </div>
+
+    ${evePick?`
+    <div class="grouptitle">导入多少条聊天记录</div>
+    <div class="group"><div class="field">
+      <div class="inline"><input type="range" min="0" max="3000" step="100" value="${eveTake}"
+        oninput="eveTake=+this.value;this.nextElementSibling.textContent=eveTake?eveTake+' 条':'不导'"
+        style="flex:1"><span style="width:64px;text-align:right;color:var(--sub)">${eveTake?eveTake+' 条':'不导'}</span></div>
+    </div></div>
+    <div class="hint">从最近往前数。<b>记忆不受这个影响，永远全导。</b><br>
+      建议 300-800 条：够角色接上最近的事，又不会把浏览器塞爆。
+      原始记录有几万条，全导会非常卡，而且模型每次也只读最近几十条。</div>
+
+    <div class="grouptitle">导入到哪里</div>
+    <div class="group">
+      <div class="cell" onclick="eveInto='';renderEve()">
+        <span class="ck ${!eveInto?'on':''}"></span>
+        <div class="main" style="flex:1"><div class="lbl">新建一个角色</div></div></div>
+      ${characters.map(c=>`
+      <div class="cell" onclick="eveInto='${c.id}';renderEve()">
+        <span class="ck ${eveInto===c.id?'on':''}"></span>
+        <div class="main" style="flex:1;min-width:0"><div class="lbl">并入「${esc(c.name)}」</div>
+          <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+            接到这个角色现有的对话前面</div></div></div>`).join('')}
+    </div>
+    <div class="hint">已经在小手机里建过这个角色、只想把历史接上去，就选「并入」。</div>
+
+    <div class="grouptitle">记忆</div>
+    <div class="group"><div class="cell static">
+      <div class="main" style="flex:1"><div class="lbl">一起导入记忆</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+          已经手动导过就别勾，会重复</div></div>
+      <label class="switch"><input type="checkbox" ${eveMem?'checked':''}
+        onchange="eveMem=this.checked"><i></i></label></div>
+    </div>
+
+    <button class="btn" onclick="doEveImport()">开始导入</button>`:''}
+    <div style="height:20px"></div>`;
+}
+function eveSel(id){ evePick=id; renderEve(); }
+
+async function doEveImport(){
+  if(!eveData||!evePick) return;
+  const src=(eveData.characters||[]).find(c=>c.id===evePick);
+  if(!src) return toast('找不到这个角色');
+  toast('导入中…');
+  try{
+    // ① 角色：新建，或并入已有的
+    const cid=eveInto||uid();
+    if(eveInto){
+      const ex=characters.find(x=>x.id===eveInto);
+      if(!ex) return toast('目标角色不见了');
+    } else {
+    const persona=personas[0];
+    const ch={id:cid,name:src.name||'导入的角色',bio:src.bio||'',
+      avatar:src.avatarUrl||'',images:[],personaId:persona?persona.id:'',
+      worldbookIds:[],pinned:false,lastRead:Date.now(),createdAt:Date.now(),
+      chat:{...DEFAULT_CHAT}};
+    if(src.background) ch.chat.chatBg=src.background;
+    await dbPut('characters',ch);
+    }
+
+    // ② 记忆：默认不导（多数情况已经手动导过了），勾了才导
+    const st=x=>Math.max(1,Math.min(5,Math.round((+x.importance||0.5)*5)));
+    let mn=0;
+    for(const [arr,ty] of (eveMem?[[eveData.coreMemories||[],'core'],
+                           [eveData.episodicMemories||[],'episodic']]:[])){
+      for(const m of arr){
+        if(m.characterId!==evePick) continue;
+        const txt=String(m.fact||m.content||'').trim();
+        if(!txt) continue;
+        await dbPut('memories',{id:uid(),characterId:cid,type:ty,content:txt,
+          importance:st(m),source:'eve',timestamp:m.timestamp||Date.now()});
+        mn++;
+      }
+    }
+
+    // ③ 聊天记录：按时间排序取最近 N 条
+    let cn=0;
+    if(eveTake>0){
+      const all=(eveData.chatMessages||[]).filter(m=>m.characterId===evePick)
+        .sort((a,b)=>(a.messageOrder||a.timestamp||0)-(b.messageOrder||b.timestamp||0));
+      for(const m of all.slice(-eveTake)){
+        const row=eveMsg(m,cid);
+        if(!row) continue;
+        await dbPut('messages',row);
+        cn++;
+      }
+    }
+
+    characters=await dbAll('characters');
+    memories=await dbAll('memories');
+    // 已经有记忆了，别让自动提取又把这批对话再嚼一遍
+    const cc=characters.find(x=>x.id===cid);
+    if(cc){ cc.memAt=cn; await dbPut('characters',cc); characters=await dbAll('characters'); }
+    eveData=null; evePick=null;
+    toast(`导入完成：${mn} 条记忆、${cn} 条消息`);
+    tab('s-chats');
+  }catch(e){ toast('导入失败：'+e.message); }
 }
 
 /* ---------- 主题色 ---------- */
@@ -4748,6 +4989,11 @@ function renderSettings(){
     ${S.showLog?'':'<div class="hint">打开后能看到每次都改了什么、为什么这么改、踩过哪些坑。</div>'}
 
     <div class="grouptitle">数据</div>
+    <div class="group"><div class="cell" onclick="openEve()">
+      <div class="lbl">从 EVE 导入</div>
+      <div class="val">角色 · 记忆 · 聊天</div>${CHEV}</div></div>
+    <div class="hint">把 EVE 导出的备份搬过来，记忆会全部保留。</div>
+
     <button class="btn ghost" onclick="exportData()">导出全部数据</button>
     <button class="btn ghost" onclick="document.getElementById('importFile').click()">导入数据</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(this)">
