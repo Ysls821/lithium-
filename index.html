@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="小手机">
 <link rel="manifest" href='data:application/manifest+json,{"name":"%E5%B0%8F%E6%89%8B%E6%9C%BA","short_name":"%E5%B0%8F%E6%89%8B%E6%9C%BA","start_url":".","scope":".","display":"standalone","orientation":"portrait","background_color":"%230A0A0C","theme_color":"%230A0A0C"}'>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>小手机</title>
 <style>
 :root{
@@ -45,11 +45,10 @@ body.kbup{align-items:flex-start}
    之前绿条就是因为这块交给浏览器画了 */
 body{background:var(--bg)!important}
 @media (prefers-color-scheme:dark){ body{background:#0A0A0C!important} }
-/* 手机上用动态视口高度：键盘弹出时浏览器给的是真实可见高度，
-   比我们自己算准。@supports 保证不支持的浏览器不受影响 */
-@supports (height:100dvh){
-  @media (max-width:439px){ #phone{height:100dvh} }
-}
+/* 注意：这里不要用 100dvh，也不要在 viewport meta 里写 interactive-widget=resizes-content。
+   两者都会让浏览器把页面缩到键盘之上 —— 一旦它算多了，缝隙里露出的是浏览器自己的底色，
+   页面完全涂不到（Via 上就是一条绿带）。保持 height:100%，让键盘盖在页面上，
+   缝隙在物理上就不可能出现，再由 initKeyboardFix 把内容顶上去。 */
 body{background:#0A0A0C;color:var(--text);
   font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;display:flex;align-items:center;justify-content:center}
@@ -2517,6 +2516,25 @@ V3 系列：加 sm / sm_dyn
 
 实测：真实备份切 400 条样本导入，`[object Object]` 归零，文字/语音/图片/表情四种类型全部正确还原，人设 1718 字完整带入。
 
+
+### 2026-08-31（三十四）· 绿框真凶：是我自己加的那行 meta
+
+**罪魁祸首是 `interactive-widget=resizes-content`** —— 今早为了「让浏览器自己处理键盘」加进 viewport meta 的那一行。它让浏览器把**布局视口**压到键盘之上；Via 的实现压多了，多出来的缝露出浏览器自己的底色（她那台主题是绿的）。
+
+这一条解释了之前所有对不上的现象：
+
+| 现象 | 原因 |
+|---|---|
+| 今早才出现 | 就是今早加的这行 |
+| 三档开关全没用 | 压缩是**浏览器**按 meta 做的，跟我的 JS 无关，所以关 JS 当然没用 |
+| 页面涂红那条不变红 | 那块被排除在布局视口**之外**，body 根本不延伸过去，涂不到 |
+| 退小窗时闪一下红 | 切换瞬间布局视口短暂恢复全高，页面盖住了那块 |
+| 别的浏览器正常 | 它们要么正确实现、要么直接忽略这个属性 |
+
+**改法**：把这行删掉，回到浏览器默认的 `resizes-visual` —— 布局视口保持全高，**键盘盖在页面上**，缝隙在物理上就不可能出现。然后由 `initKeyboardFix` 按 `visualViewport` 把内容顶上去（这套逻辑本来就在，之前被 meta 架空了）。
+
+顺手把上一版加的 `100dvh` 也删了 —— 它和 `resizes-content` 是同一种失败模式：都让页面缩到键盘之上，一旦浏览器算多了就留缝，而缝里是页面涂不到的地方。CSS 里留了注释说明为什么不能用这两个。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2529,6 +2547,8 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **`interactive-widget=resizes-content` 在实现不全的浏览器上留缝** → 它把布局视口压到键盘之上，浏览器算多了就露出自己的底色，而那块在布局视口之外、页面 CSS 完全够不着。同理 `100dvh` 也是。**凡是「让页面缩到键盘之上」的方案，都有这个风险；让键盘盖在页面上（`height:100%` + visualViewport 顶内容）才是安全的。**
+- **排查时忘了怀疑自己刚加的东西** → 绿框是我今早加 meta 引入的，却花了五六轮去查浏览器、查键盘、查 CSS。**「什么时候开始的」永远要先和「我什么时候改了什么」对一遍。** 用户说的"昨晚没有今早才有"就是最强线索，我当时没抓住。
 - **导入外部数据时假设字段都是字符串** → EVE 的 `content` 有 91 条是多模态数组，直接塞进 innerHTML 渲染成 `[object Object]`。导别人的数据前先统计一遍每个字段的实际类型分布，别看头两条就下结论。
 - **`100dvh` 在内嵌 iframe 里算成 0** → 直接给 `#phone` 加 `height:100dvh` 导致整个界面塌成 0 高。必须用 `@supports (height:100dvh)` 包住，并限定只在窄屏生效，桌面保留 `height:100%`。新的视口单位要给退路。
 - **给用户的开关自己是坏的** → 「钉住」档的生效条件 `kb>80` 在目标浏览器上恒不成立，等于这一档从没跑过。用户三档全试后反馈"都没用"，实际只试了两档，白白多绕一轮。**做成开关的排查手段，每一档都要先验证真的会执行。**
