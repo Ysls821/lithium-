@@ -2579,6 +2579,38 @@ V3 系列：加 sm / sm_dyn
 
 实测：12 条对话触发摘要 → 存库 → `buildSystemPrompt` 里四项（故事线/跨场景/挂载/收尾句）全部命中。
 
+
+### 2026-09-01（二）· 历史改成按「轮」读
+
+用户指出：历史上下文应该按**轮**取，不是按条。查了她导入的真实数据，问题比想象严重：
+
+```
+姬照 70762 条消息，切成 12251 段连发
+AI 每次连发：平均 8.7 条，中位 8，最多 37 条
+我每次连发：平均 2.8 条
+一轮平均 ≈ 11.5 条
+```
+
+**所以设「30 条历史」实际只有 2.6 轮** —— 角色只看得到最后两三个来回，前面吵了什么、为什么生气全被挤出去了。他接不住话是必然的，跟提示词无关。这是之前所有"人不活"的问题里，最硬的一条。
+
+**改法**：新增 `takeTurns(ms, turns)`，从后往前扫，role 每变一次算一段连发、两段算一轮，多扫一段保证首轮完整（不会从角色连发的半截切进去）。`historyFor()` 统一出口，`requestReply` 和 `proactiveSend` 都走它。
+
+- 全局默认 **12 轮**（≈140 条）
+- 每角色可覆盖，还能切回「按条」模式（`histMode: turn|msg`），老行为完整保留
+- 硬上限 400 条，防止某轮特别长撑爆请求
+- 注入管理器的标签改成「历史 N 轮」，一眼看出实际装了几轮
+
+实测（她导入的 400 条姬照记录）：
+
+| 设置 | 实际拿到 |
+|---|---|
+| 旧「30 条」 | 5 轮 |
+| 新「5 轮」 | 41 条 |
+| 新「12 轮」 | 121 条 |
+| 新「20 轮」 | 180 条 |
+
+切轮边界验证：起点是 user、role 严格交替，没有半截连发。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2591,6 +2623,7 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **上下文窗口按"条"算，对连发型角色等于砍掉大半** → 角色一次连发 8-10 条时，"30 条历史"只有 2.6 轮。**凡是"最近 N 条"的窗口，都要先问清楚一条是多大的单位**；对话类的正确单位是轮，不是条。
 - **声称"追平"却没验证对方的实现** → 说记忆机制"和 EVE 一样"时，其实只查过它怎么**提取**，没查怎么**挑选和注入**（用户用的词是"唤起"，比我准）。一查发现 EVE 多三层。**说"和 X 一样"之前，要把 X 的那一侧也读完。**
 - **后台 tick 的互斥锁在手动连调时会假失败** → `sumBusy` 没重置就再调一次 tick，看起来像功能坏了。调试这类节流函数前先把锁清掉。
 - **全局后台任务没给每个对象留开关** → 记忆自动提取对所有角色一视同仁地跑，但用户有当记事本用的角色，提取毫无意义还打扰、烧额度。**凡是"对所有 X 自动做某事"的功能，都要能按 X 单独关掉。**
@@ -2680,7 +2713,7 @@ const DEFAULT_STYLE=`["在呢", "刚洗完澡", "怎么啦？"]
 
 const DEFAULT_SETTINGS={
   id:'global', apiBase:'https://api.openai.com/v1', apiKey:'', model:'gpt-4o-mini',
-  temperature:0.8, historyCount:30, maxMessages:8,
+  temperature:0.8, historyCount:30, histTurns:12, maxMessages:8,
   userName:'我', userPersona:'', timeAware:true, banNarration:true,
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
@@ -2709,6 +2742,7 @@ const PAGE=40;
 const DEFAULT_CHAT={
   bubbleMe:'', bubbleTa:'', fontSize:15.5,
   chatBg:'', immersive:true, setImmersive:false, showInject:false, historyCount:0,
+  histMode:'turn', histTurns:0,
   journalShare:false, journalRate:20, presetId:'', povEnabled:false, memAuto:true,
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   xdmEnabled:false, xdmRate:15, xdmHours:6,
@@ -5098,7 +5132,10 @@ function renderSettings(){
 
     <div class="grouptitle">对话</div>
     <div class="group">
-      <div class="field"><label>携带历史条数</label><input id="s-hist" type="number" min="4" max="200" value="${S.historyCount}"></div>
+      <div class="field"><label>携带历史轮数</label>
+        <input id="s-histturns" type="number" min="2" max="60" value="${S.histTurns}"></div>
+      <div class="field"><label>按条数时带几条（角色单独设成「按条」时用）</label>
+        <input id="s-hist" type="number" min="4" max="400" value="${S.historyCount}"></div>
       <div class="field"><label>单次最多回几条</label><input id="s-maxm" type="number" min="1" max="20" value="${S.maxMessages}"></div>
       <div class="cell static"><div class="lbl">时间感知</div>
         <label class="switch"><input type="checkbox" id="s-time" ${S.timeAware?'checked':''}><i></i></label></div>
@@ -5111,7 +5148,10 @@ function renderSettings(){
           onchange="toggleNotify(this)"><i></i></label></div>
     </div>
     <div class="hint" id="notifyHint">${notifyHintText()}</div>
-    <div class="hint">时间感知会注入当前时间、季节，以及距上次对话过了多久。<br>
+    <div class="hint"><b>一轮 = 对方说一次 + 你回一次。</b>
+      角色一次常连发 8-10 条，所以「30 条」其实只有 2-3 轮 —— 他会看不到你们刚才在吵什么。
+      按轮算才符合人对对话的理解。12 轮大约 140 条消息。<br>
+      时间感知会注入当前时间、季节，以及距上次对话过了多久。<br>
       纯对话模式禁止一切动作 / 神态 / 心理描写，只留台词。<br>
       真图识别只对最近 6 条里的前 3 张生效，避免请求体积失控；关掉后真图只发文字说明。
       <b>模型必须支持视觉</b>，否则会报错。</div>
@@ -5314,7 +5354,9 @@ async function saveSettings(){
   S={ ...S, id:'global',
     apiBase:v('s-base').value.trim().replace(/\/+$/,''), apiKey:v('s-key').value.trim(),
     model:v('s-model').value.trim(), temperature:parseFloat(v('s-temp').value)||0.8,
-    historyCount:parseInt(v('s-hist').value)||30, maxMessages:parseInt(v('s-maxm').value)||8,
+    historyCount:parseInt(v('s-hist').value)||30,
+    histTurns:Math.max(2,parseInt(v('s-histturns').value)||12),
+    maxMessages:parseInt(v('s-maxm').value)||8,
     timeAware:v('s-time').checked, banNarration:v('s-ban').checked,
     visionEnabled:v('s-vision').checked, notifyOn:v('s-notify').checked,
     accent:S.accent||'#7A68F0', showLog:S.showLog===true,
@@ -6018,10 +6060,22 @@ function renderChatSet(){
       改完记得点最下面的保存。</div>
 
     <div class="grouptitle">上下文</div>
-    <div class="group"><div class="field"><label>历史记忆读取条数</label>
-      <input type="number" min="0" max="200" value="${g.historyCount}"
-        oninput="setCfg('historyCount',parseInt(this.value)||0,true)"></div></div>
-    <div class="hint">这个角色单独的设置。填 <b>0</b> 表示跟随全局（当前全局是 ${S.historyCount} 条）。</div>
+    <div class="group">
+      <div class="field"><div class="seg">
+        <div class="${g.histMode!=='msg'?'on':''}" onclick="setCfg('histMode','turn')">按轮</div>
+        <div class="${g.histMode==='msg'?'on':''}" onclick="setCfg('histMode','msg')">按条</div>
+      </div></div>
+      ${g.histMode==='msg'
+        ? `<div class="field"><label>读取条数</label>
+            <input type="number" min="0" max="400" value="${g.historyCount}"
+              oninput="setCfg('historyCount',parseInt(this.value)||0,true)"></div>`
+        : `<div class="field"><label>读取轮数</label>
+            <input type="number" min="0" max="60" value="${g.histTurns}"
+              oninput="setCfg('histTurns',parseInt(this.value)||0,true)"></div>`}
+    </div>
+    <div class="hint">填 <b>0</b> 跟随全局（现在是 ${g.histMode==='msg'?S.historyCount+' 条':S.histTurns+' 轮'}）。<br>
+      <b>一轮 = TA 说一次 + 你回一次</b>。TA 一次连发 8-10 条很常见，
+      所以按条数很容易只装下两三个来回，前面吵了什么就丢了。爱连发的角色务必用「按轮」。</div>
 
     <div class="grouptitle">第三视角镜头</div>
     <div class="group">
@@ -6285,8 +6339,7 @@ async function proactiveTick(){
   }
 }
 async function proactiveSend(c,ms,g){
-  const n=g.historyCount||S.historyCount;
-  const history=ms.slice(-n);
+  const history=historyFor(c,ms);
   const gapMin=Math.floor((Date.now()-ms[ms.length-1].timestamp)/60000);
   const gap=gapMin>=1440?`${Math.floor(gapMin/1440)}天`:gapMin>=60?`${Math.floor(gapMin/60)}小时`:`${gapMin}分钟`;
   const sys=buildSystemPrompt(c,history)+`
@@ -10390,6 +10443,37 @@ ${S.styleExamples.trim()}`;
   return p;
 }
 
+/* ============================================================
+   按「轮」取历史
+   一轮 = 对方发一次 + 你回一次。角色一次常连发 8-10 条（实测姬照
+   平均 8.7、最多 37），所以"最近 30 条"其实只有 2.6 轮 —— 他看不到
+   你们刚才在吵什么。按轮取才是人理解对话的方式。
+   ============================================================ */
+function takeTurns(ms,turns){
+  if(!ms.length) return [];
+  const want=Math.max(1,turns|0);
+  // 从后往前扫，role 每变一次算一段连发，两段算一轮
+  let runs=0, last=null, i=ms.length-1;
+  for(;i>=0;i--){
+    const r=ms[i].role;
+    if(r!==last){ runs++; last=r; }
+    if(runs>want*2) break;      // 多扫一段，保证第一轮完整
+  }
+  return ms.slice(i+1);
+}
+/* 上限：轮数换算的条数再多也不能撑爆请求 */
+const HIST_HARD_CAP=400;
+function historyFor(c,ms){
+  const g=chatCfg(c);
+  if(g.histMode==='msg'){                     // 老行为：按条
+    const n=g.historyCount||S.historyCount;
+    return ms.slice(-n);
+  }
+  const t=g.histTurns||S.histTurns||12;
+  const out=takeTurns(ms,t);
+  return out.length>HIST_HARD_CAP?out.slice(-HIST_HARD_CAP):out;
+}
+
 /* 历史 -> API messages；最近的真图用多模态格式带上，让模型真的看到 */
 const VISION_LOOKBACK=6, VISION_MAX=3;
 function toApiMessages(history){
@@ -10602,16 +10686,19 @@ async function openMsgImage(id){
 
 async function requestReply(){
   const char=characters.find(x=>x.id===curCharId);
-  const n=chatCfg(char).historyCount||S.historyCount;
-  const history=(await msgsOf(curCharId)).slice(-n);
+  const history=historyFor(char,await msgsOf(curCharId));
   let sys=buildSystemPrompt(char,history);
   if(regenNote) sys+=`
 
 # **⚠️ 用户对这次回复的额外要求**
 ${regenNote}
 请在遵守上面全部规则的前提下满足这个要求。`;
-  lastInject.history={label:'历史消息',n:history.length,
-    chars:history.reduce((a,m)=>a+msgToText(m).length,0)};
+  {
+    let runs=0,last=null;
+    for(const m of history){ if(m.role!==last){ runs++; last=m.role; } }
+    lastInject.history={label:`历史 ${Math.ceil(runs/2)} 轮`,n:history.length,
+      chars:history.reduce((a,m)=>a+msgToText(m).length,0)};
+  }
   lastInject.note=regenNote?{label:'重生成要求',chars:regenNote.length}:null;
   lastInject.cid=curCharId;
   lastInject.total=sys.length+lastInject.history.chars;
