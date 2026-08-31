@@ -2387,6 +2387,17 @@ V3 系列：加 sm / sm_dyn
 
 用真 `TouchEvent` 回归通过：`touch-action:pan-y`、滑过阈值 `swready`、松手成功设为引用。
 
+
+### 2026-08-31（二十七）· 键盘空隙的真正原因
+
+**是我今早那个键盘修复自己造出来的**，而且只在部分浏览器（用户那台是 Via）复现，换浏览器就没有——和消息条数、角色无关。
+
+根因：判断键盘高度时用了 `window.innerHeight` 当基准。**有的浏览器键盘弹出后 `innerHeight` 不变，但布局视口其实已经被浏览器自己压到键盘之上了**。于是我算出一个几百像素的"键盘高度"，又把机身压了一遍——**压两遍**，底下就空出一条，露出浏览器自己的背景色（她那台 Via 主题是绿的，所以是绿框）。
+
+改法：基准换成 `document.documentElement.clientHeight`（真正的布局视口）。算出来的键盘高度 ≤80px 就说明浏览器已经自己处理过了，我们完全不介入；只有布局视口没被压（iOS Safari 这类）才由我们把机身压到 `visualViewport.height`。两种分支都模拟验证过。
+
+另外加了 **设置 → 关于 → 键盘诊断**（跟开发日志一个开关）：弹出 innerHeight / 布局高度 / 可视高度 / 偏移 / 算出的键盘高度 / 机身实际高度 / UA，并复制到剪贴板。以后排版对不上直接取数，不用猜。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2399,6 +2410,7 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **拿 `window.innerHeight` 当布局视口基准** → 部分浏览器键盘弹出后 innerHeight 不变但布局视口已被自己压过，照差值再压一次就是压两遍，底部空出一条露出浏览器背景色。要用 `document.documentElement.clientHeight`，并且先判断浏览器有没有自己处理。**修 A 浏览器的兼容代码可能是 B 浏览器的 bug 源**——这种改动要留诊断入口。
 - **flex 居中容器里改子元素高度** → `body{align-items:center}` 下把 `#phone` 改矮，空隙会平均分到上下两边，看起来像"底部多出一条"。缩高度的同时必须改对齐方式。
 - **触摸手势不设 touch-action** → 浏览器默认吞掉横向手势，JS 的 move 回调根本不触发。自定义横滑必须写 `touch-action:pan-y`。
 - **正则里的 `\r?\n` 匹配错了** → JS 正则 `/\r?\n/` 是「反斜杠 + 可选 r + 反斜杠 + n」四个字符，不是我要的两字符字面量 `
@@ -2747,26 +2759,53 @@ function initSwipeQuote(){
 
 /* ---------- 键盘：iOS 上键盘弹出后 100vh 不变，底部会空出一条 ----------
    用 visualViewport 把机身高度压到真正可见的那部分 */
+let kbInfo={};
 function initKeyboardFix(){
   const vv=window.visualViewport;
   if(!vv) return;
   const phone=document.getElementById('phone');
   let raf=0;
+  const reset=()=>{
+    phone.style.height='';
+    phone.classList.remove('kbup');
+    document.body.classList.remove('kbup');
+  };
   const apply=()=>{
     raf=0;
-    const gap=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
-    const up=gap>80;
-    // 键盘顶上来时直接用可视高度当机身高度，比"总高减差值"准；
-    // 同时把 body 改成顶对齐，否则 align-items:center 会把缩短的机身居中、下面空一条
-    phone.style.height=up?vv.height+'px':'';
-    phone.classList.toggle('kbup',up);
-    document.body.classList.toggle('kbup',up);
-    if(up&&document.getElementById('s-chat').classList.contains('active')) pinChatBottom();
+    // 用布局视口（html 的 clientHeight）当基准，不要用 window.innerHeight ——
+    // 有的浏览器键盘弹出后 innerHeight 不变，但布局视口其实已经被自己压过了
+    const layoutH=document.documentElement.clientHeight;
+    const kb=Math.max(0,layoutH-vv.height-vv.offsetTop);
+    kbInfo={inner:window.innerHeight,layout:layoutH,vv:Math.round(vv.height),
+            off:Math.round(vv.offsetTop),kb:Math.round(kb)};
+
+    // ① 浏览器自己已经把布局压到键盘之上了（Via、部分安卓内核、支持
+    //    interactive-widget 的新浏览器都是这样）—— 这时布局高度已经约等于可视高度。
+    //    我们再压一次就是压两遍，底下会空出一条，露出浏览器自己的背景色。
+    if(kb<=80){ reset(); return; }
+
+    // ② 浏览器没管（iOS Safari 这类）—— 由我们把机身压到可视区
+    phone.style.height=vv.height+'px';
+    phone.classList.add('kbup');
+    document.body.classList.add('kbup');
+    if(document.getElementById('s-chat').classList.contains('active')) pinChatBottom();
   };
   const on=()=>{ if(!raf) raf=requestAnimationFrame(apply); };
   vv.addEventListener('resize',on);
   vv.addEventListener('scroll',on);
+  window.addEventListener('orientationchange',()=>setTimeout(apply,260));
   apply();
+}
+/* 键盘对不上时用这个看真实数值，省得靠猜 */
+function kbDiag(){
+  const vv=window.visualViewport;
+  const p=document.getElementById('phone').getBoundingClientRect();
+  const d={...kbInfo, phoneH:Math.round(p.height), phoneTop:Math.round(p.top),
+    kbup:document.getElementById('phone').classList.contains('kbup'),
+    vvNow:vv?Math.round(vv.height):'不支持', ua:navigator.userAgent.slice(0,90)};
+  const txt=Object.entries(d).map(([k,v])=>k+': '+v).join('\n');
+  navigator.clipboard?.writeText(txt);
+  alert('键盘诊断（已复制）\n\n'+txt+'\n\n把输入框点开、键盘弹出时再点一次，两次数值都发给我。');
 }
 
 /* ---------- 长按 ---------- */
@@ -4449,7 +4488,9 @@ function renderSettings(){
         <label class="switch"><input type="checkbox" id="s-showlog" ${S.showLog?'checked':''}
           onchange="S.showLog=this.checked;renderSettings()"><i></i></label></div>
       ${S.showLog?`<div class="cell" onclick="openLog()"><div class="lbl">开发日志</div>
-        <div class="val">${logStats()}</div>${CHEV}</div>`:''}
+        <div class="val">${logStats()}</div>${CHEV}</div>
+      <div class="cell" onclick="kbDiag()"><div class="lbl">键盘诊断</div>
+        <div class="val">排版对不上时用</div>${CHEV}</div>`:''}
     </div>
     ${S.showLog?'':'<div class="hint">打开后能看到每次都改了什么、为什么这么改、踩过哪些坑。</div>'}
 
