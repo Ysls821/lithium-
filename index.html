@@ -430,16 +430,12 @@ body{background:#0A0A0C;color:var(--text);
 /* 顶底的模糊蒙层：backdrop-filter 把背景糊掉，再用 mask 让模糊本身渐隐，
    所以没有硬边 —— 这就是输入栏那种毛玻璃质感，不是压暗的色块。
    z-index:2 让它盖在气泡之上（气泡滚进去会糊掉，像滑进雾里）。 */
-#chatFrost{position:absolute;left:0;right:0;top:0;height:150px;pointer-events:none;z-index:2;
-  -webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);
-  -webkit-mask-image:linear-gradient(to bottom,#000 34%,transparent);
-  mask-image:linear-gradient(to bottom,#000 34%,transparent)}
 #chatFrostB{position:absolute;left:0;right:0;bottom:0;height:170px;pointer-events:none;z-index:2;
   -webkit-backdrop-filter:blur(16px) saturate(140%);backdrop-filter:blur(16px) saturate(140%);
   -webkit-mask-image:linear-gradient(to top,#000 42%,transparent);
   mask-image:linear-gradient(to top,#000 42%,transparent)}
-/* 顶栏和输入栏本身要浮在模糊层之上，否则文字也被糊掉 */
-#s-chat .navbar,#s-chat #chatInputBar,#s-chat #plusPanel{position:relative;z-index:3}
+/* 输入栏要浮在底部模糊层之上，否则文字也被糊掉。顶栏维持原样，不参与 */
+#s-chat #chatInputBar,#s-chat #plusPanel{position:relative;z-index:3}
 #phone.imm #screens{position:relative;z-index:1}
 #phone.imm #s-chat{background:transparent}
 #phone.imm #statusbar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
@@ -1571,7 +1567,6 @@ input[type=range]{accent-color:var(--accent)}
         <button id="chatSetBtn" onclick="openChatSet()"><svg width="20" height="5" viewBox="0 0 20 5" fill="currentColor"><circle cx="2.5" cy="2.5" r="2"/><circle cx="10" cy="2.5" r="2"/><circle cx="17.5" cy="2.5" r="2"/></svg></button>
       </div>
       <div class="body" id="chatBody" onscroll="onChatScroll()"></div>
-      <div id="chatFrost"></div>
       <div id="chatFrostB"></div>
       <div id="injectPill" onclick="showInject()"></div>
       <div id="toBottom" onclick="scrollChatBottom()"><svg viewBox="0 0 17 17"><path d="M8.5 2v13M3 9.5l5.5 5.5L14 9.5"/></svg></div>
