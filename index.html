@@ -2,7 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="theme-color" content="#7A68F0">
+<meta name="theme-color" content="#0A0A0C">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="小手机">
+<link rel="manifest" href='data:application/manifest+json,{"name":"%E5%B0%8F%E6%89%8B%E6%9C%BA","short_name":"%E5%B0%8F%E6%89%8B%E6%9C%BA","start_url":".","scope":".","display":"standalone","orientation":"portrait","background_color":"%230A0A0C","theme_color":"%230A0A0C"}'>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
 <title>小手机</title>
 <style>
@@ -2418,6 +2423,15 @@ V3 系列：加 sm / sm_dyn
 
 判断逻辑：切「关闭」后色块消失 → 是本程序的问题；三档都试完色块还在 → 那块是键盘或浏览器自己画的，网页侧改不掉。
 
+
+### 2026-08-31（三十）· 判定绿条归属
+
+用户三档全试过，绿条都在。**「关闭」档本程序一行都不执行**，页面就是浏览器给多高占多高——绿条仍在，基本可以断定不是本页面漏出来的空白。
+
+**底色排查开关**（设置 → 关于）：把 `html`/`body` 底色刷成 `#FF0033`。开着去聊天页调出键盘：那条跟着变红＝是本页面的空白，能修；还是原色＝由浏览器或输入法自己绘制，网页侧碰不到。一次试验替代继续推理。
+
+**加了 PWA 支持** — `manifest`（内联 data URI）+ `mobile-web-app-capable` + `apple-mobile-web-app-capable`，`display:standalone`、竖屏锁定。「添加到主屏幕」后用独立窗口打开，绕开浏览器自己那圈 UI，这类 chrome 引起的排版问题通常直接消失。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -3373,6 +3387,19 @@ async function setWeather(m){
   S.weather={...(S.weather||{i:.5}),mode:m};
   await dbPut('settings',S);
   refreshHomeImm('s-settings'); renderSettings();
+}
+/* 决定性判定：把页面底色刷成红色。
+   键盘上方那条要是跟着变红 → 是本页面的空白，我能修；
+   还是绿的 → 那块由浏览器或键盘自己绘制，网页侧碰不到 */
+let bgProbeOn=false;
+function toggleBgProbe(){
+  bgProbeOn=!bgProbeOn;
+  document.documentElement.style.background=bgProbeOn?'#FF0033':'';
+  document.body.style.background=bgProbeOn?'#FF0033':'';
+  renderSettings();
+  toast(bgProbeOn
+    ?'底色已改成红色。去聊天页点开输入框看那条颜色'
+    :'已恢复');
 }
 async function setKbMode(m){
   S.kbMode=m; await dbPut('settings',S);
@@ -4580,6 +4607,18 @@ function renderSettings(){
       <div class="cell" onclick="kbDiag()"><div class="lbl">键盘诊断</div>
         <div class="val">排版对不上时用</div>${CHEV}</div>`:''}
     </div>
+
+    <div class="grouptitle">底色排查</div>
+    <div class="group"><div class="cell static">
+      <div class="main" style="flex:1;min-width:0"><div class="lbl">把页面底色刷成红色</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">用完记得关掉</div></div>
+      <label class="switch"><input type="checkbox" ${bgProbeOn?'checked':''}
+        onchange="toggleBgProbe()"><i></i></label></div>
+    </div>
+    <div class="hint">键盘上方那条颜色到底是谁画的，一试就知道：<br>
+      开了之后去聊天页点开输入框——<b>那条跟着变红</b>＝是本页面的空白，能修；
+      <b>还是原来的颜色</b>＝那块由浏览器或输入法自己绘制，网页侧碰不到，
+      换个浏览器或者把本站「添加到主屏幕」用独立窗口打开就没有了。</div>
 
     <div class="grouptitle">键盘适配</div>
     <div class="group"><div class="field"><div class="seg">
