@@ -423,22 +423,8 @@ body{background:#0A0A0C;color:var(--text);
 /* 遮罩画成一整块盖在背景图上，跨过状态栏+导航栏；
    分别挂在两个元素上会在交界处切出一条硬边 */
 #chatBg::before,#chatBg::after{content:"";position:absolute;left:0;right:0;pointer-events:none}
-/* 遮罩只为了让顶栏文字在浅色壁纸上还看得清，做得很淡、很长，
-   看不出边界 —— 用户不要"一层护栏"，要按钮直接悬浮在画面上 */
-/* 顶底的压暗改由 navbar/inputBar 自己的渐变蒙层负责，这里不再叠一层 */
-#chatBg::before,#chatBg::after{display:none}
-#phone.imm.noscrim #chatBg::before,
-#phone.imm.noscrim #chatBg::after{display:none}
-/* 排查用：把聊天页上所有叠加图层关掉 */
-#phone.bare #chatBg::before,#phone.bare #chatBg::after{display:none!important}
-#phone.bare #weatherCv{display:none!important}
-/* 保险：只要没在真正渲染，画布一律不显示 —— 空 canvas 是不透明的，
-   会盖住 chatBg，顶部就露出一条纯色带 */
-#phone:not(.wxlive) #weatherCv{display:none!important}
-#phone.bare #s-chat *{box-shadow:none!important;
-  -webkit-backdrop-filter:none!important;backdrop-filter:none!important}
-#phone.bare #s-chat .navbar,#phone.bare #chatInputBar{
-  background:transparent!important;border:none!important}
+#chatBg::before{top:0;height:118px;background:var(--imm-scrim-top)}
+#chatBg::after{bottom:0;height:132px;background:var(--imm-scrim-bot)}
 #phone.imm #screens{position:relative;z-index:1}
 #phone.imm #s-chat{background:transparent}
 #phone.imm #statusbar{background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none;
@@ -507,52 +493,14 @@ body{background:#0A0A0C;color:var(--text);
   color:var(--accent);line-height:12px;margin-top:1px;height:12px}
 .navbar .title b{display:block;font-weight:600;line-height:16px}
 
-#toBottom{position:absolute;right:14px;bottom:88px;width:38px;height:38px;border-radius:50%;
+#toBottom{position:absolute;right:14px;bottom:74px;width:38px;height:38px;border-radius:50%;
   background:var(--card);box-shadow:0 3px 12px rgba(0,0,0,.18);display:none;align-items:center;
   justify-content:center;cursor:pointer;z-index:6}
 #toBottom.show{display:flex}
 #toBottom svg{width:17px;height:17px;stroke:var(--accent);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 #chatInputBar{flex:0 0 auto;display:flex;gap:9px;padding:9px 12px 12px;align-items:flex-end;
-  background:transparent;border-top:none}
-/* 非沉浸时顶栏也跟聊天页同底色、不描边 —— 不做出横切画面的那条"护栏" */
-/* 聊天页的顶栏和底栏是"浮"在内容之上的，不占位。
-   气泡因此能一直滚到屏幕边缘，不会被栏切掉半截；
-   body 用 padding 让出等高的空间，保证最后一条能完整停在栏前面。 */
-#s-chat .navbar{background:transparent;border-bottom:none;
-  -webkit-backdrop-filter:none;backdrop-filter:none;
-  position:absolute;top:0;left:0;right:0;z-index:12}
-#s-chat .navbar>*,#s-chat #chatInputBar>*{position:relative;z-index:1}
-#s-chat .navbar,#s-chat #chatInputBar{isolation:isolate}
-#s-chat #chatInputBar{position:absolute;left:0;right:0;bottom:0;z-index:12}
-#s-chat #plusPanel{position:absolute;left:0;right:0;bottom:0;z-index:11}
-/* body 必须显式压到栏下面：不给层级的话，气泡（带阴影/变换）
-   在部分浏览器会浮到 absolute 定位的栏之上，出现文字盖住顶栏的现象 */
-/* isolation 把整个滚动区封成独立的层叠上下文 ——
-   .msg 带 animation/transform 会自建层叠上下文并提升为合成层，
-   光给 .body 设 z-index 拦不住，气泡照样能飘到顶栏之上。 */
-#s-chat .body{padding-top:46px;padding-bottom:64px;
-  position:relative;z-index:1;isolation:isolate}
-/* 展开 + 面板时，底部要让出更多 */
-#s-chat #plusPanel.open ~ .body{padding-bottom:0}
-/* 渐变蒙层：垫在顶栏/底栏底下，从透明过渡到底色。
-   气泡滚过去是"淡入雾里"，不是被一条硬边切断 —— 这是关键，
-   用户明确说可以有蒙层，但不要横切画面。 */
-#s-chat .navbar::before,#s-chat #chatInputBar::before{
-  content:"";position:absolute;left:0;right:0;pointer-events:none;z-index:0}
-#s-chat .navbar::before{top:0;height:170%;
-  background:linear-gradient(to bottom,var(--chat-bg) 14%,transparent)}
-#s-chat #chatInputBar::before{bottom:0;height:210%;
-  background:linear-gradient(to top,var(--chat-bg) 26%,transparent)}
-/* 沉浸模式下用半透明深色，让壁纸仍然透出来 */
-#phone.imm #s-chat .navbar::before{
-  background:linear-gradient(to bottom,rgba(10,10,16,.38) 10%,transparent)}
-#phone.imm #s-chat #chatInputBar::before{
-  background:linear-gradient(to top,rgba(10,10,16,.42) 22%,transparent)}
-#phone.imm.lightbg #s-chat .navbar::before{
-  background:linear-gradient(to bottom,rgba(245,245,250,.40) 10%,transparent)}
-#phone.imm.lightbg #s-chat #chatInputBar::before{
-  background:linear-gradient(to top,rgba(245,245,250,.44) 22%,transparent)}
-#phone.bare #s-chat .navbar::before,#phone.bare #s-chat #chatInputBar::before{display:none}
+  background:var(--nav);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
+  border-top:.5px solid var(--line)}
 #chatInput{flex:1;resize:none;max-height:108px;min-height:38px;padding:8px 15px;background:var(--card);
   border:.5px solid var(--line2);border-radius:19px;color:var(--text);font:inherit;font-size:15.5px;
   outline:none;line-height:1.4}
