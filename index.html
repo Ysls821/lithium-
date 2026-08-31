@@ -2535,6 +2535,21 @@ V3 系列：加 sm / sm_dyn
 
 顺手把上一版加的 `100dvh` 也删了 —— 它和 `resizes-content` 是同一种失败模式：都让页面缩到键盘之上，一旦浏览器算多了就留缝，而缝里是页面涂不到的地方。CSS 里留了注释说明为什么不能用这两个。
 
+
+### 2026-08-31（三十五）
+
+**记忆自动提取加了每角色开关** — 用户有个「需求机」角色是当记事本用的（往里丢待办、需求），自动提取跑到它头上，既没意义又弹 toast 打扰、还白烧额度。
+
+- 聊天设置 → 记忆与收藏 → **自动提取记忆**（每角色，默认开）
+- `memAutoTick` 跳过关掉的角色，**一次 API 都不会发**
+- toast 改成只在「正在看这个角色的聊天页」时才弹；后台给别的角色提取时默默进行，不打断你手头的事
+
+实测：两个角色各喂 14 条消息，开着的提取了 1 条记忆，关掉的 0 调用 0 记忆、`memAt` 保持 0。
+
+**绿框：上一版的结论是错的。** 用户澄清「今早有的时候是还没开始用你的时候有的」—— 绿框在我改 viewport meta **之前**就存在，所以 `interactive-widget=resizes-content` 不是原因（不过删掉它本身没有坏处，保持删除）。
+
+排除到最后，唯一和全部证据吻合的解释是：**那是 Via 浏览器自己在键盘上方画的输入辅助栏**。不属于网页（涂红不变色）、只在 Via 出现、早于任何代码改动。属于浏览器设置问题，网页侧无解，停止继续改代码猜。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2547,6 +2562,8 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **全局后台任务没给每个对象留开关** → 记忆自动提取对所有角色一视同仁地跑，但用户有当记事本用的角色，提取毫无意义还打扰、烧额度。**凡是"对所有 X 自动做某事"的功能，都要能按 X 单独关掉。**
+- **连着两次在同一个问题上猜错并下结论** → 绿框先后归因到「双重压缩」和「我加的 meta」，都错。证据不足时应该说"还不确定"，而不是给一个听起来完整的解释。用户一句"这在你改之前就有了"就推翻了整套推理。
 - **`interactive-widget=resizes-content` 在实现不全的浏览器上留缝** → 它把布局视口压到键盘之上，浏览器算多了就露出自己的底色，而那块在布局视口之外、页面 CSS 完全够不着。同理 `100dvh` 也是。**凡是「让页面缩到键盘之上」的方案，都有这个风险；让键盘盖在页面上（`height:100%` + visualViewport 顶内容）才是安全的。**
 - **排查时忘了怀疑自己刚加的东西** → 绿框是我今早加 meta 引入的，却花了五六轮去查浏览器、查键盘、查 CSS。**「什么时候开始的」永远要先和「我什么时候改了什么」对一遍。** 用户说的"昨晚没有今早才有"就是最强线索，我当时没抓住。
 - **导入外部数据时假设字段都是字符串** → EVE 的 `content` 有 91 条是多模态数组，直接塞进 innerHTML 渲染成 `[object Object]`。导别人的数据前先统计一遍每个字段的实际类型分布，别看头两条就下结论。
@@ -2661,7 +2678,7 @@ const PAGE=40;
 const DEFAULT_CHAT={
   bubbleMe:'', bubbleTa:'', fontSize:15.5,
   chatBg:'', immersive:true, setImmersive:false, showInject:false, historyCount:0,
-  journalShare:false, journalRate:20, presetId:'', povEnabled:false,
+  journalShare:false, journalRate:20, presetId:'', povEnabled:false, memAuto:true,
   xdmEnabled:false, xdmRate:15, xdmHours:6,
   avatarRadius:50, textMe:'', textTa:'',
   proEnabled:false, proMinutes:60, proDaily:5
@@ -4866,6 +4883,7 @@ async function memAutoTick(){
   if(memAutoBusy||sending||!db||!S.memAuto) return;
   const every=Math.max(4,+S.memEvery||12);
   for(const c of characters){
+    if(chatCfg(c).memAuto===false) continue;  // 这个角色单独关掉了（比如纯记事用的）
     const ms=await msgsOf(c.id);
     if(ms.length<every) continue;
     const done=c.memAt||0;                    // 上次提取时处理到第几条
@@ -4876,7 +4894,9 @@ async function memAutoTick(){
       c.memAt=ms.length;
       await dbPut('characters',c);
       characters=await dbAll('characters');
-      if(n) toast(`${c.name}：记住了 ${n} 件事`);
+      // 只有正在看这个角色时才提示，后台默默记就行，别打断你在别处干的事
+      if(n&&curCharId===c.id&&document.getElementById('s-chat').classList.contains('active'))
+        toast(`记住了 ${n} 件事`);
     }
     memAutoBusy=false;
     break;                                    // 一轮只处理一个角色
@@ -5881,7 +5901,14 @@ function renderChatSet(){
       <div class="cell" onclick="goMemory()"><div class="lbl">记忆库</div>
         <div class="val">${memsOf(curCharId).length} 条</div>${CHEV}</div>
       <div class="cell" onclick="openFavs()"><div class="lbl">收藏的消息</div>${CHEV}</div>
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">自动提取记忆</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+          纯记事、不需要 TA 记住的对话就关掉</div></div>
+        <label class="switch"><input type="checkbox" ${g.memAuto!==false?'checked':''}
+          onchange="setCfg('memAuto',this.checked,true)"><i></i></label></div>
     </div>
+    <div class="hint">关掉后这个角色不再自动提取记忆，也不会消耗额度。全局开关在 设置 → 记忆。</div>
 
     <div class="grouptitle">起居注分享</div>
     <div class="group">
