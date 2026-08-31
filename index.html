@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="theme-color" content="#7A68F0">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-content">
 <title>小手机</title>
 <style>
 :root{
@@ -33,6 +33,7 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;margin:0;overscroll-behavior:none}
+body.kbup{align-items:flex-start}
 body{background:#0A0A0C;color:var(--text);
   font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased;display:flex;align-items:center;justify-content:center}
@@ -444,7 +445,7 @@ body{background:#0A0A0C;color:var(--text);
   border-bottom-right-radius:7px;box-shadow:0 2px 10px rgba(106,86,232,.28)}
 #s-chat.cta .msg:not(.me) .bubble{color:var(--tx-ta)}
 #s-chat.cme .msg.me .bubble{color:var(--tx-me)}
-.msg{transition:transform .22s cubic-bezier(.32,.72,0,1)}
+.msg{transition:transform .22s cubic-bezier(.32,.72,0,1);touch-action:pan-y}
 .msg.swiping{transition:none}
 .msg::after{content:"";position:absolute;right:6px;top:50%;width:26px;height:26px;
   margin-top:-13px;border-radius:50%;background:var(--accent);opacity:0;
@@ -1470,8 +1471,7 @@ input[type=range]{accent-color:var(--accent)}
   opacity:0;transition:.26s cubic-bezier(.3,1.2,.6,1);pointer-events:none;z-index:99;max-width:82%;
   text-align:center;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-#phone{--kb:0px}
-#phone.kbup{height:calc(100% - var(--kb))}
+#phone.kbup{max-height:none}
 #phone.kbup #chatInputBar{padding-bottom:8px}
 #homebar{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:130px;height:4.5px;
   border-radius:3px;background:currentColor;opacity:.22;z-index:70;pointer-events:none}
@@ -2372,6 +2372,21 @@ V3 系列：加 sm / sm_dyn
 
 **聊天设置页分段重排** — 18 个分组平铺要滑五屏，现在按语义收成四段：**外观**（预览 / 气泡 / 文字颜色 / 头像形状 / 字号 / 背景）→ **TA 怎么回你**（预设 / 上下文 / 第三视角 / 主动发消息）→ **TA 知道什么**（世界书 / 记忆 / 起居注分享 / X 小号私信）→ **管理**（调试 / 角色图片 / 危险操作）。同时把 15 条说明也收进了标题旁的问号里，跟设置页一致。
 
+
+### 2026-08-31（二十六）· 真机回归
+
+**键盘空隙没修干净** — 上一版只压了机身高度，漏了两件事：
+
+1. `body` 是 `display:flex; align-items:center` —— 机身一变矮就被**垂直居中**，下面自然空出一条。键盘顶上来时改成 `align-items:flex-start` 顶对齐。
+2. 高度改成直接用 `visualViewport.height`，不再拿"总高减差值"算；`max-height:868px` 在键盘态解除，否则窄屏上会二次截断。
+3. 视口 meta 加了 `interactive-widget=resizes-content` —— 让浏览器自己把布局视口压到键盘之上，新版 Safari / Chrome 支持后根本不用 JS 兜。
+
+**左滑引用在 iOS 上完全不触发** — 两个原因叠一起：
+- `.msg` 没设 `touch-action`，浏览器默认把横向手势当成自己的滚动/返回手势收走，JS 收不到 move。加 `touch-action:pan-y` 显式让出横向。
+- iOS 的 `-webkit-overflow-scrolling:touch` 容器里，pointer 事件一开始滚就被 `pointercancel` 掉。改成主用 touch 事件（`touchstart/move/end`，move 里 `passive:false` + 认定左滑后 `preventDefault`），桌面鼠标继续走 pointer 那套，两边按 `pointerType` 分流互不干扰。
+
+用真 `TouchEvent` 回归通过：`touch-action:pan-y`、滑过阈值 `swready`、松手成功设为引用。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2384,6 +2399,8 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **flex 居中容器里改子元素高度** → `body{align-items:center}` 下把 `#phone` 改矮，空隙会平均分到上下两边，看起来像"底部多出一条"。缩高度的同时必须改对齐方式。
+- **触摸手势不设 touch-action** → 浏览器默认吞掉横向手势，JS 的 move 回调根本不触发。自定义横滑必须写 `touch-action:pan-y`。
 - **正则里的 `\r?\n` 匹配错了** → JS 正则 `/\r?\n/` 是「反斜杠 + 可选 r + 反斜杠 + n」四个字符，不是我要的两字符字面量 `
 `。要写 `/(?:\r)?\n/`。
 - **保存角色整个覆盖对象** → `saveChar` 没有 spread 旧值，聊天设置 / 手机 / lithium / 日记 / 关系全丢。写 dbPut 时凡是"部分更新"都必须先 spread 旧对象——这是第二次栽（第一次是 savePhoneSet 冲掉自定义图标）。
@@ -2673,23 +2690,21 @@ let swQ=null;
 function initSwipeQuote(){
   const box=document.getElementById('chatBody');
   if(!box) return;
-  box.addEventListener('pointerdown',e=>{
-    if(selectMode) return;
-    const el=e.target.closest('.msg[data-lpid]'); if(!el) return;
-    swQ={el,id:el.dataset.lpid,x:e.clientX,y:e.clientY,on:false};
-  });
-  box.addEventListener('pointermove',e=>{
+  const start=(el,x,y)=>{ swQ={el,id:el.dataset.lpid,x,y,on:false}; };
+  const move=(x,y,ev)=>{
     if(!swQ) return;
-    const dx=e.clientX-swQ.x, dy=e.clientY-swQ.y;
+    const dx=x-swQ.x, dy=y-swQ.y;
     if(!swQ.on){
-      if(Math.abs(dy)>14){ swQ=null; return; }        // 在竖着滚列表，放手
-      if(dx>-16) return;                              // 还没算左滑
+      if(Math.abs(dy)>14){ swQ=null; return; }     // 在竖着滚列表，放手
+      if(dx>-16) return;                           // 还没算左滑
       swQ.on=true; swQ.el.classList.add('swiping');
     }
+    // 认定是左滑之后就把手势吃掉，别让页面跟着横向晃
+    if(ev&&ev.cancelable) ev.preventDefault();
     const off=Math.max(-84,Math.min(0,dx));
     swQ.el.style.transform=`translateX(${off}px)`;
     swQ.el.classList.toggle('swready',off<=-52);
-  });
+  };
   const end=async()=>{
     if(!swQ) return;
     const {el,id,on}=swQ; swQ=null;
@@ -2698,12 +2713,36 @@ function initSwipeQuote(){
     el.classList.remove('swiping','swready');
     el.style.transform='';
     if(!ready) return;
-    if(navigator.vibrate) navigator.vibrate(10);
+    try{ navigator.vibrate&&navigator.vibrate(10); }catch(e){}
     const m=(await msgsOf(curCharId)).find(x=>x.id===id);
     if(m) setQuote(m);
   };
-  box.addEventListener('pointerup',end);
-  box.addEventListener('pointercancel',end);
+  /* iOS 上滚动容器里的 pointer 事件一开始滚就被 pointercancel 掉，
+     所以主用 touch 事件；桌面鼠标再走 pointer 那套 */
+  box.addEventListener('touchstart',e=>{
+    if(selectMode||e.touches.length!==1) return;
+    const el=e.target.closest('.msg[data-lpid]'); if(!el) return;
+    start(el,e.touches[0].clientX,e.touches[0].clientY);
+  },{passive:true});
+  box.addEventListener('touchmove',e=>{
+    if(!swQ||e.touches.length!==1) return;
+    move(e.touches[0].clientX,e.touches[0].clientY,e);
+  },{passive:false});
+  box.addEventListener('touchend',end);
+  box.addEventListener('touchcancel',end);
+
+  box.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='touch') return;            // 触摸交给上面那套
+    if(selectMode) return;
+    const el=e.target.closest('.msg[data-lpid]'); if(!el) return;
+    start(el,e.clientX,e.clientY);
+  });
+  box.addEventListener('pointermove',e=>{
+    if(e.pointerType==='touch') return;
+    move(e.clientX,e.clientY,null);
+  });
+  box.addEventListener('pointerup',e=>{ if(e.pointerType!=='touch') end(); });
+  box.addEventListener('pointercancel',e=>{ if(e.pointerType!=='touch') end(); });
 }
 
 /* ---------- 键盘：iOS 上键盘弹出后 100vh 不变，底部会空出一条 ----------
@@ -2716,9 +2755,13 @@ function initKeyboardFix(){
   const apply=()=>{
     raf=0;
     const gap=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
-    phone.style.setProperty('--kb',gap+'px');
-    phone.classList.toggle('kbup',gap>80);
-    if(gap>80&&document.getElementById('s-chat').classList.contains('active')) pinChatBottom();
+    const up=gap>80;
+    // 键盘顶上来时直接用可视高度当机身高度，比"总高减差值"准；
+    // 同时把 body 改成顶对齐，否则 align-items:center 会把缩短的机身居中、下面空一条
+    phone.style.height=up?vv.height+'px':'';
+    phone.classList.toggle('kbup',up);
+    document.body.classList.toggle('kbup',up);
+    if(up&&document.getElementById('s-chat').classList.contains('active')) pinChatBottom();
   };
   const on=()=>{ if(!raf) raf=requestAnimationFrame(apply); };
   vv.addEventListener('resize',on);
