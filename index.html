@@ -2398,6 +2398,13 @@ V3 系列：加 sm / sm_dyn
 
 另外加了 **设置 → 关于 → 键盘诊断**（跟开发日志一个开关）：弹出 innerHeight / 布局高度 / 可视高度 / 偏移 / 算出的键盘高度 / 机身实际高度 / UA，并复制到剪贴板。以后排版对不上直接取数，不用猜。
 
+
+### 2026-08-31（二十八）
+
+**键盘诊断改成自动记录** — 上一版的诊断入口在设置页，而**点它的时候键盘必然是关的**，所以永远取不到键盘弹起那一刻的数值，等于白做。改成在视口每次明显变化时自动留一条记录（最多 10 条），诊断弹窗里列出全部历史，挑出 vv 最小的那条（键盘顶得最高时），并直接给结论：布局视口有没有跟着变矮、程序介没介入。
+
+用户真机（Android 16 / Via）关着键盘时的读数是 `layout 788 ≈ vv 789 → kb 0 → kbup false`，说明修复后本程序确实没再插手。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2410,6 +2417,7 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **诊断入口取不到要诊断的状态** → 键盘诊断放在设置页，可点击时键盘一定已经收起。要诊断瞬时状态就得自动采样存历史，不能等用户手动触发。
 - **拿 `window.innerHeight` 当布局视口基准** → 部分浏览器键盘弹出后 innerHeight 不变但布局视口已被自己压过，照差值再压一次就是压两遍，底部空出一条露出浏览器背景色。要用 `document.documentElement.clientHeight`，并且先判断浏览器有没有自己处理。**修 A 浏览器的兼容代码可能是 B 浏览器的 bug 源**——这种改动要留诊断入口。
 - **flex 居中容器里改子元素高度** → `body{align-items:center}` 下把 `#phone` 改矮，空隙会平均分到上下两边，看起来像"底部多出一条"。缩高度的同时必须改对齐方式。
 - **触摸手势不设 touch-action** → 浏览器默认吞掉横向手势，JS 的 move 回调根本不触发。自定义横滑必须写 `touch-action:pan-y`。
@@ -2759,7 +2767,7 @@ function initSwipeQuote(){
 
 /* ---------- 键盘：iOS 上键盘弹出后 100vh 不变，底部会空出一条 ----------
    用 visualViewport 把机身高度压到真正可见的那部分 */
-let kbInfo={};
+let kbInfo={}, kbLog=[];
 function initKeyboardFix(){
   const vv=window.visualViewport;
   if(!vv) return;
@@ -2778,6 +2786,12 @@ function initKeyboardFix(){
     const kb=Math.max(0,layoutH-vv.height-vv.offsetTop);
     kbInfo={inner:window.innerHeight,layout:layoutH,vv:Math.round(vv.height),
             off:Math.round(vv.offsetTop),kb:Math.round(kb)};
+    // 视口每次明显变化都留一条，事后才能看到键盘弹起那一刻的数
+    const prev=kbLog[kbLog.length-1];
+    if(!prev||Math.abs(prev.vv-kbInfo.vv)>20||Math.abs(prev.layout-kbInfo.layout)>20){
+      kbLog.push({...kbInfo,at:new Date().toTimeString().slice(0,8)});
+      if(kbLog.length>10) kbLog.shift();
+    }
 
     // ① 浏览器自己已经把布局压到键盘之上了（Via、部分安卓内核、支持
     //    interactive-widget 的新浏览器都是这样）—— 这时布局高度已经约等于可视高度。
@@ -2796,16 +2810,35 @@ function initKeyboardFix(){
   window.addEventListener('orientationchange',()=>setTimeout(apply,260));
   apply();
 }
-/* 键盘对不上时用这个看真实数值，省得靠猜 */
+/* 键盘对不上时用这个看真实数值，省得靠猜。
+   注意：这个入口在设置页，点的时候键盘一定是关的 —— 所以关键是 kbLog 里
+   自动记下的历史，里面才有键盘弹起那一刻的数 */
 function kbDiag(){
   const vv=window.visualViewport;
   const p=document.getElementById('phone').getBoundingClientRect();
-  const d={...kbInfo, phoneH:Math.round(p.height), phoneTop:Math.round(p.top),
-    kbup:document.getElementById('phone').classList.contains('kbup'),
-    vvNow:vv?Math.round(vv.height):'不支持', ua:navigator.userAgent.slice(0,90)};
-  const txt=Object.entries(d).map(([k,v])=>k+': '+v).join('\n');
-  navigator.clipboard?.writeText(txt);
-  alert('键盘诊断（已复制）\n\n'+txt+'\n\n把输入框点开、键盘弹出时再点一次，两次数值都发给我。');
+  const now={...kbInfo, phoneH:Math.round(p.height),
+    kbup:document.getElementById('phone').classList.contains('kbup')};
+  // 记录里 vv 最小的那条，就是键盘顶得最高的时候
+  const low=kbLog.length?kbLog.reduce((a,b)=>b.vv<a.vv?b:a):null;
+  const lines=[
+    '【当前 · 键盘关着】',
+    Object.entries(now).map(([k,v])=>'  '+k+': '+v).join('\n'),
+    '',
+    '【视口变化记录 '+kbLog.length+' 条】',
+    kbLog.length?kbLog.map(x=>`  ${x.at}  layout=${x.layout} vv=${x.vv} off=${x.off} kb=${x.kb}`).join('\n')
+      :'  （还没记到 —— 先去聊天页点一下输入框把键盘调出来，再回来点这里）',
+    '',
+    low&&low.vv<now.vv-40
+      ? `【结论】键盘顶起时 vv=${low.vv}、layout=${low.layout}、算出 kb=${low.kb}\n`+
+        (low.kb<=80
+          ? '  → 布局视口跟着一起变矮了，说明浏览器自己会处理，本程序没有介入。正确。'
+          : '  → 布局视口没变矮，由本程序把机身压到了可视高度。')
+      : '【结论】还没记录到键盘弹起 —— 去聊天页点开输入框，等键盘完全弹出，再回来点这里。',
+    '',
+    'ua: '+navigator.userAgent.slice(0,110)
+  ].join('\n');
+  try{ navigator.clipboard&&navigator.clipboard.writeText(lines); }catch(e){}
+  alert('键盘诊断（已复制）\n\n'+lines);
 }
 
 /* ---------- 长按 ---------- */
