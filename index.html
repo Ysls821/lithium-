@@ -2405,6 +2405,19 @@ V3 系列：加 sm / sm_dyn
 
 用户真机（Android 16 / Via）关着键盘时的读数是 `layout 788 ≈ vv 789 → kb 0 → kbup false`，说明修复后本程序确实没再插手。
 
+
+### 2026-08-31（二十九）· 键盘适配给用户开关
+
+连着两版靠推理修键盘空隙都没修掉，改成**可验证**：设置 → 关于 → **键盘适配**，三档。
+
+- **自动**（默认）：先判断浏览器有没有自己把布局压到键盘之上，它管了就不插手
+- **关闭**：本程序完全不动，纯交给浏览器 —— 用来判断这条空隙到底是不是我造成的
+- **钉住**：`position:fixed` + `visualViewport` 的 offsetTop/left/width/height，强制把界面贴合当前可见区域，不管浏览器是哪种模式
+
+诊断弹窗里也带上了当前模式和实际接管状态（`让浏览器管` / `本程序压高度` / `off` / `pin`），历史记录每条也标了当时是谁在管。
+
+判断逻辑：切「关闭」后色块消失 → 是本程序的问题；三档都试完色块还在 → 那块是键盘或浏览器自己画的，网页侧改不掉。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -2417,6 +2430,7 @@ V3 系列：加 sm / sm_dyn
 
 ## 修过的坑
 
+- **靠推理修跨浏览器排版问题** → 键盘空隙连猜两版都没中。手上没有目标设备时，与其继续猜，不如把行为做成用户可切换的开关 + 自动采样的诊断，让问题变成可测量的。
 - **诊断入口取不到要诊断的状态** → 键盘诊断放在设置页，可点击时键盘一定已经收起。要诊断瞬时状态就得自动采样存历史，不能等用户手动触发。
 - **拿 `window.innerHeight` 当布局视口基准** → 部分浏览器键盘弹出后 innerHeight 不变但布局视口已被自己压过，照差值再压一次就是压两遍，底部空出一条露出浏览器背景色。要用 `document.documentElement.clientHeight`，并且先判断浏览器有没有自己处理。**修 A 浏览器的兼容代码可能是 B 浏览器的 bug 源**——这种改动要留诊断入口。
 - **flex 居中容器里改子元素高度** → `body{align-items:center}` 下把 `#phone` 改矮，空隙会平均分到上下两边，看起来像"底部多出一条"。缩高度的同时必须改对齐方式。
@@ -2500,6 +2514,7 @@ const DEFAULT_SETTINGS={
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
   homeBg:'', homeImm:true, mmCover:'', xposts:[], glassMode:'mix', weather:{mode:'',i:.5,chat:false},
+  kbMode:'auto',
   oracle:{mode:'watcher',text:''},
   img:{backend:'novelai',base:'https://image.novelai.net',key:'',model:'nai-diffusion-4-5-full',
     w:832,h:1216,steps:28,cfg:5,sampler:'k_euler_ancestral',
@@ -2778,8 +2793,22 @@ function initKeyboardFix(){
     phone.classList.remove('kbup');
     document.body.classList.remove('kbup');
   };
+  const pin=()=>{
+    // 直接钉在可视视口上：不管浏览器是哪种模式，vv 描述的永远是真正看得见的那块
+    phone.style.position='fixed';
+    phone.style.top=vv.offsetTop+'px';
+    phone.style.left=vv.offsetLeft+'px';
+    phone.style.width=vv.width+'px';
+    phone.style.height=vv.height+'px';
+    phone.classList.add('kbup');
+    document.body.classList.add('kbup');
+  };
+  const unpin=()=>{
+    phone.style.position=''; phone.style.top=''; phone.style.left=''; phone.style.width='';
+  };
   const apply=()=>{
     raf=0;
+    const mode=S.kbMode||'auto';
     // 用布局视口（html 的 clientHeight）当基准，不要用 window.innerHeight ——
     // 有的浏览器键盘弹出后 innerHeight 不变，但布局视口其实已经被自己压过了
     const layoutH=document.documentElement.clientHeight;
@@ -2793,12 +2822,28 @@ function initKeyboardFix(){
       if(kbLog.length>10) kbLog.shift();
     }
 
-    // ① 浏览器自己已经把布局压到键盘之上了（Via、部分安卓内核、支持
+    kbInfo.mode=mode;
+
+    // 关闭：完全不插手，交给浏览器
+    if(mode==='off'){ kbInfo.act='off'; unpin(); reset(); return; }
+
+    // 钉住：不管哪种模式，都把机身贴合可视视口
+    if(mode==='pin'){
+      kbInfo.act='pin';
+      if(kb>80||Math.abs(vv.offsetTop)>2) pin();
+      else { unpin(); reset(); }
+      if(document.getElementById('s-chat').classList.contains('active')) pinChatBottom();
+      return;
+    }
+
+    // 自动 ① 浏览器自己已经把布局压到键盘之上了（Via、部分安卓内核、支持
     //    interactive-widget 的新浏览器都是这样）—— 这时布局高度已经约等于可视高度。
     //    我们再压一次就是压两遍，底下会空出一条，露出浏览器自己的背景色。
-    if(kb<=80){ reset(); return; }
+    if(kb<=80){ kbInfo.act='让浏览器管'; unpin(); reset(); return; }
 
-    // ② 浏览器没管（iOS Safari 这类）—— 由我们把机身压到可视区
+    // 自动 ② 浏览器没管（iOS Safari 这类）—— 由我们把机身压到可视区
+    kbInfo.act='本程序压高度';
+    unpin();
     phone.style.height=vv.height+'px';
     phone.classList.add('kbup');
     document.body.classList.add('kbup');
@@ -2821,11 +2866,13 @@ function kbDiag(){
   // 记录里 vv 最小的那条，就是键盘顶得最高的时候
   const low=kbLog.length?kbLog.reduce((a,b)=>b.vv<a.vv?b:a):null;
   const lines=[
+    '模式: '+(S.kbMode||'auto')+'　接管: '+(kbInfo.act||'-'),
+    '',
     '【当前 · 键盘关着】',
     Object.entries(now).map(([k,v])=>'  '+k+': '+v).join('\n'),
     '',
     '【视口变化记录 '+kbLog.length+' 条】',
-    kbLog.length?kbLog.map(x=>`  ${x.at}  layout=${x.layout} vv=${x.vv} off=${x.off} kb=${x.kb}`).join('\n')
+    kbLog.length?kbLog.map(x=>`  ${x.at}  layout=${x.layout} vv=${x.vv} off=${x.off} kb=${x.kb} [${x.act||'-'}]`).join('\n')
       :'  （还没记到 —— 先去聊天页点一下输入框把键盘调出来，再回来点这里）',
     '',
     low&&low.vv<now.vv-40
@@ -3326,6 +3373,14 @@ async function setWeather(m){
   S.weather={...(S.weather||{i:.5}),mode:m};
   await dbPut('settings',S);
   refreshHomeImm('s-settings'); renderSettings();
+}
+async function setKbMode(m){
+  S.kbMode=m; await dbPut('settings',S);
+  const p=document.getElementById('phone');
+  p.style.position=''; p.style.top=''; p.style.left=''; p.style.width=''; p.style.height='';
+  p.classList.remove('kbup'); document.body.classList.remove('kbup');
+  renderSettings();
+  toast(m==='auto'?'已设为自动':m==='off'?'已关闭键盘适配':'已设为钉住可视区');
 }
 function pickHomeBg(){
   pickImage(async d=>{
@@ -4525,6 +4580,18 @@ function renderSettings(){
       <div class="cell" onclick="kbDiag()"><div class="lbl">键盘诊断</div>
         <div class="val">排版对不上时用</div>${CHEV}</div>`:''}
     </div>
+
+    <div class="grouptitle">键盘适配</div>
+    <div class="group"><div class="field"><div class="seg">
+      <div class="${(S.kbMode||'auto')==='auto'?'on':''}" onclick="setKbMode('auto')">自动</div>
+      <div class="${S.kbMode==='off'?'on':''}" onclick="setKbMode('off')">关闭</div>
+      <div class="${S.kbMode==='pin'?'on':''}" onclick="setKbMode('pin')">钉住</div>
+    </div></div></div>
+    <div class="hint">键盘弹出时输入框上下对不齐、或者中间空出一条颜色时，换一档试试。<br>
+      <b>自动</b>：先看浏览器有没有自己把页面压到键盘之上，它管了就不插手。<br>
+      <b>关闭</b>：完全交给浏览器，本程序一点不动。<br>
+      <b>钉住</b>：强制把整个界面贴合当前可见区域。<br>
+      三档都试完还是有色块，那块八成是键盘或浏览器自己画的，网页改不掉。</div>
     ${S.showLog?'':'<div class="hint">打开后能看到每次都改了什么、为什么这么改、踩过哪些坑。</div>'}
 
     <div class="grouptitle">数据</div>
