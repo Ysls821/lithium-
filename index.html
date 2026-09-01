@@ -530,8 +530,15 @@ body{background:#0A0A0C;color:var(--text);
   display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--nav)}
 
 /* 消息类型 */
-.bubble.img,.bubble.voice,.bubble.loc,.bubble.sticker,.bubble.fake,.bubble.tf,.bubble.call{white-space:normal}
+.bubble.img,.bubble.voice,.bubble.loc,.bubble.sticker,.bubble.fake,.bubble.tf,.bubble.call,.bubble.xsh{white-space:normal}
 .bubble.pad0{padding:4px}
+/* X 帖子转发卡片 */
+.bubble.xsh{display:block;min-width:180px;max-width:232px;padding:9px 12px 10px}
+.bubble.xsh .xh{display:flex;align-items:center;gap:5px;font-size:12px;opacity:.72;margin-bottom:5px}
+.bubble.xsh .xh span{margin-left:auto;font-weight:800;font-style:italic;font-size:13px}
+.bubble.xsh .xi{width:100%;border-radius:8px;margin:2px 0 5px;max-height:130px;object-fit:cover;display:block}
+.bubble.xsh .xt{font-size:13.5px;line-height:1.55;opacity:.92;border-left:2.5px solid currentColor;padding-left:8px}
+.bubble.xsh .cap{margin-top:7px}
 .bubble.img{position:relative}
 .bubble.img img{display:block;max-width:180px;max-height:240px;border-radius:15px;object-fit:cover;cursor:pointer}
 .bubble.img .cap{padding:6px 9px 3px;font-size:13.5px;opacity:.85}
@@ -597,7 +604,7 @@ body{background:#0A0A0C;color:var(--text);
 .bubble.call{display:flex;align-items:center;gap:9px;min-width:150px}
 
 /* 朋友圈 */
-.mmcover{height:126px;background:linear-gradient(150deg,#8E7BF8,#5A4FC7 60%,#2E2A52);
+.mmcover{height:176px;background:linear-gradient(150deg,#8E7BF8,#5A4FC7 60%,#2E2A52);
   position:relative;margin-bottom:34px}
 .mmcover .mme{position:absolute;right:14px;bottom:-24px;display:flex;align-items:flex-end;gap:10px}
 .mmcover .mme span{color:#fff;font-size:15px;font-weight:600;padding-bottom:32px;
@@ -1229,7 +1236,7 @@ input[type=range]{accent-color:var(--accent)}
   border-radius:8px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;
   display:flex;align-items:center;justify-content:center}
 .liprof{padding:0 0 4px}
-.liprof .cov3{height:104px;background:linear-gradient(130deg,#5B4B8A,#8E7BF8 55%,#3E5C76)}
+.liprof .cov3{height:150px;background:linear-gradient(130deg,#5B4B8A,#8E7BF8 55%,#3E5C76)}
 .liprof .pin{padding:0 16px;margin-top:-32px}
 .liprof .av3{width:66px;height:66px;border-radius:50%;overflow:hidden;background:var(--grad);
   border:3px solid var(--bg);display:flex;align-items:center;justify-content:center;color:#fff}
@@ -2800,6 +2807,22 @@ if(m.type==='text' && splitSentences(m.content).length>1)   // ← 旧
 实现上加了 `buildSystemPrompt(char,history,splitWb)` 第三参：requestReply 传 true 走拆分路径；主动消息、TA手机生成等一次性 prompt 的旧调用方不传，世界书仍然内联，行为不变。
 
 顺带修：注入胶囊的 total 以前漏算预设 jb（它是单独的 user 消息不在 sys 里），也没算独立下发的世界书 —— 用户对比 16000 字 vs 9503 token 时发现显示口径不全。现在 total = sys + 历史 + 世界书after + jb。（16000 字 ≈ 9500 token 本身不矛盾，中文约 0.6 token/字。）
+
+### 2026-09-01（十二）· X 转发进聊天（双边互通）+ 封面加高 + TA手机消息预生成
+
+**① X 帖子转发进聊天，双边都知道**
+
+- 角色帖子详情页 → 「转发到你们的聊天」：聊天里出现一张 X 卡片气泡（@小号名 + 引用正文 + 图），同时记进 `xlog`——下轮聊天的提示词里角色就知道「对方把你的帖子转发进了你们的聊天」，X 侧和聊天侧是通的
+- 我的帖子详情页 → 「转发给角色…」：弹角色列表选一个，卡片进那个聊天
+- **角色也能主动转**：有公开帖的角色，提示词里多一段 `{"type":"xshare","text":"帖子原文","comment":"…"}` 输出格式，只允许转列表里真实存在的原文，低频使用
+- 角色感知靠 `msgBody`：历史里这条会变成 `[转发了一条 X 帖子——@xx：「…」]`
+- 新气泡类型 `xsh` 已加进 `white-space:normal` 名单（第四次了，这次没忘）
+
+**② 封面加高**：X 个人页 `cov3` 104→150px，朋友圈 `mmcover` 126→176px，朋友圈封面裁剪比例 2.86→2.1
+
+**③ TA 手机的消息预生成**：会话列表的生成 prompt 直接让模型为每个会话带上 6-10 条 `msgs`，点进去立刻能看，不再是点开才现拉。模型没给 msgs 时沿用旧消息，点开为空仍有兜底自动拉取
+
+评论功能查了下**本来就有**：X 帖子详情页底部有评论框，发出后角色会以小号口吻回复，且已记 xlog；朋友圈也有 `commentMoment`/`aiCommentMoment`。这次没重复做。
 
 ---
 
@@ -5790,6 +5813,14 @@ function bubbleHTML(m,cfg,isMe){
       <span class="wave">${wave}</span><span class="dur">${dur}"</span>
       <div class="vtext">${esc(m.content)}</div></div>`;
   }
+  if(m.type==='xsh'){
+    const x=m.meta||{};
+    return `<div class="bubble xsh" ${style}>
+      <div class="xh"><b>@${esc(x.who||'?')}</b><span>𝕏</span></div>
+      ${x.img?`<img class="xi" src="${esc(x.img)}">`:''}
+      <div class="xt">${esc(x.text||'')}</div>
+      ${m.content?`<div class="cap">${esc(m.content)}</div>`:''}</div>`;
+  }
   if(m.type==='call')
     return `<div class="bubble call" ${style} onclick="event.stopPropagation();showCallLog('${m.id}')">
       ${IC('call',17)}<span>通话 ${esc(m.meta.dur||'')}</span></div>`;
@@ -8099,7 +8130,7 @@ function pickMmCover(){
   pickImage(async d=>{
     S.mmCover=d; await dbPut('settings',S);
     renderMoments(); toast('封面已更新');
-  },1200,.8,{ratio:3/1.05,title:'朋友圈封面'});
+  },1200,.8,{ratio:2.1,title:'朋友圈封面'});
 }
 function renderMoments(){
   const c=mmGlobal?null:characters.find(x=>x.id===curCharId);
@@ -9408,6 +9439,7 @@ function renderXPost(){
       <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(p.time||'')}</div>
       <div class="dstat"><span><b>${cs.length||p.replies||0}</b> 回复</span>
         <span><b>${p.likes||0}</b> 赞</span></div>
+      <button class="btn ghost" style="margin:10px 0 0" onclick="shareXToChat()">转发到你们的聊天</button>
     </div>
     <div class="licount">${IC('quote',14)}<b>${cs.length}</b> 条评论</div>
     ${cs.length?cs.map(x=>`
@@ -9433,6 +9465,7 @@ function renderXPostMine(p){
       <div class="dtx">${esc(p.text||'')}</div>
       <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(p.time||'')}</div>
       <div class="dstat"><span><b>${cs.length}</b> 回复</span><span><b>${p.likes||0}</b> 赞</span></div>
+      <button class="btn ghost" style="margin:10px 0 0" onclick="shareMyXToChat()">转发给角色…</button>
     </div>
     <div class="licount">${IC('quote',14)}<b>${cs.length}</b> 条评论</div>
     ${cs.length?cs.map(x=>`
@@ -9559,6 +9592,32 @@ ${hist}
   finally{ btn.disabled=false; }
 }
 
+/* ---------- 转发帖子进聊天：双边互通的关键 ----------
+   聊天里插 xsh 气泡（msgBody 会translate给模型），同时记 xlog，
+   这样 X 侧和聊天侧都知道这件事发生过 */
+async function shareXToChat(){
+  const r=xPostOf(); if(!r||!r.p||r.mine) return;
+  const {c,p}=r, L=liData(c), name=L.handle||c.xname||c.name;
+  await dbPut('messages',{id:uid(),characterId:c.id,role:'user',type:'xsh',content:'',
+    meta:{who:name,text:String(p.text||'').slice(0,200),img:p.img||''},
+    quote:null,timestamp:Date.now()});
+  xLogAdd(c,'share',{post:String(p.text||'').slice(0,60)});
+  await dbPut('characters',c); characters=await dbAll('characters');
+  toast('已转发到你们的聊天');
+}
+async function shareMyXToChat(){
+  const r=xPostOf(); if(!r||!r.p||!r.mine) return;
+  const post=r.p;
+  const acts=characters.map(c=>({av:c.avatar,t:c.name,fn:async()=>{
+    await dbPut('messages',{id:uid(),characterId:c.id,role:'user',type:'xsh',content:'',
+      meta:{who:myXName(),text:String(post.text||'').slice(0,200)},
+      quote:null,timestamp:Date.now()});
+    toast('已转发给 '+c.name+'，进聊天说点什么吧');
+  }}));
+  if(!acts.length) return toast('还没有角色');
+  actionSheet('转发给…',acts);
+}
+
 /* ---------- X 互通日志：主聊天的提示词会带上 ---------- */
 function xLogAdd(c,kind,data){
   c.xlog=c.xlog||[];
@@ -9575,6 +9634,8 @@ function xContext(c){
     ?`- 对方发了帖子「${x.post}」，你用小号评论了「${x.reply}」`
     :x.kind==='xdmPush'
     ?`- 你用小号主动私信了对方：「${x.reply}」`
+    :x.kind==='share'
+    ?`- 对方把你的帖子「${x.post}」转发进了你们的聊天`
     :`- 你的帖子「${x.post}」下对方评论「${x.mine}」，你回「${x.reply}」`).join('\n');
   return `\n\n# **X 上的互动**
 你在 X 上有个匿名账号「${L.handle||c.name}」，对方（${myXName()}）关注了它，最近有这些互动：
@@ -9853,7 +9914,11 @@ ${convo}
 
 只输出 JSON 数组，3-6 条，按最近活跃排序：
 [{"who":"对方名字或备注","tag":"关系标签4字内，如 家人/同学/工作，可留空",
-  "last":"最后一条内容20字内","time":"14:32 或 昨天","unread":未读数字}]
+  "last":"最后一条内容20字内","time":"14:32 或 昨天","unread":未读数字,
+  "msgs":[{"from":"them","text":"…"},{"from":"me","text":"…"}]}]
+
+msgs 是这段对话最近的 6-10 条消息（从早到晚，from 只能是 them 或 me），
+每条 5-40 字，语气贴合这段关系的温度，last 必须和 msgs 的最后一条一致
 
 要求：
 - 名字要像真的通讯录备注（"妈"、"老周"、"班主任"、"闲鱼买家"…）
@@ -9870,7 +9935,10 @@ ${convo}
       who:S1(x.who).slice(0,14),tag:S1(x.tag).slice(0,6),
       last:S1(x.last).slice(0,50),time:S1(x.time).slice(0,10),
       unread:Math.max(0,Math.round(+x.unread)||0),
-      msgs:old[S1(x.who).slice(0,14)]||[]}))};
+      msgs:(Array.isArray(x.msgs)&&x.msgs.length
+        ?x.msgs.filter(y=>y&&y.text).slice(0,20).map(y=>({
+          from:y.from==='me'?'me':'them',text:S1(y.text).slice(0,140)}))
+        :old[S1(x.who).slice(0,14)]||[])}))};
     await dbPut('characters',c); characters=await dbAll('characters');
     renderPhChats(); if(!silent) toast('好了');
     return true;
@@ -10697,6 +10765,14 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 - 撤回后对方**看不到内容**，只会看到一条"你撤回了一条消息"的提示
 - 常见玩法：先发一句真心话，紧接着撤回 —— \`["我想你了", {"type":"recall"}]\`
 - **低频使用**，一次对话最多一次，不要每轮都撤`;
+  const _liPub=(((char.li||{}).posts)||[]).filter(x=>!x.private);
+  if(_liPub.length) p+=`
+
+# **转发你的 X 帖子**
+你在 X 上有个小号，发过下面这些帖子。想给对方看某条时，在数组里放：\`{"type":"xshare","text":"帖子原文","comment":"转发时想说的话，可省略"}\`
+${_liPub.slice(0,6).map(x=>'- '+String(x.text).slice(0,50)).join(String.fromCharCode(10))}
+- text 必须是上面列表里真实存在的原文，不要编造
+- 剧情合适才转，低频使用`;
   const _cfgPov=chatCfg(char);
   if(_cfgPov.povEnabled) p+=`
 
@@ -10820,6 +10896,11 @@ function toMsg(p){
     meta:{amount:p.amount,status:'pending'}};
   if(p.type==='voice') return {type:'voice',content:p.content,
     meta:{dur:Math.max(1,Math.round(p.content.length/3.6))}};
+  if(p.type==='xsh'){
+    const c=characters.find(x=>x.id===curCharId)||{};
+    const who=((c.li||{}).handle)||c.xname||c.name||'?';
+    return {type:'xsh',content:p.content,meta:{who,text:p.xtext.slice(0,200)}};
+  }
   return {type:'text',content:p.content,meta:{}};
 }
 
@@ -10843,6 +10924,10 @@ function normPart(x){
       { const c=pick(x.content||x.text); return c?{type:'voice',content:c}:null; }
     if(ty==='pov')
       { const c=pick(x.content||x.text); return c?{type:'pov',content:c}:null; }
+    if(ty==='xshare'||ty==='share_post'){
+      const t=pick(x.text||x.post); if(!t) return null;
+      return {type:'xsh',content:pick(x.comment||''),xtext:t};
+    }
     const c=pick(x.content||x.message||x.text);
     return c?{type:'text',content:c}:null;
   }
@@ -11031,6 +11116,10 @@ function msgBody(m){
     return `[转账 ¥${m.meta.amount}${m.content&&m.content!=='转账'?'　留言：'+m.content:''}]${tail}`;
   }
   if(m.type==='voice')    return `[语音消息] ${m.content}`;
+  if(m.type==='xsh'){
+    const x=m.meta||{};
+    return `[转发了一条 X 帖子——@${x.who||'?'}：「${x.text||''}」]${m.content?'　'+m.content:''}`;
+  }
   if(m.type==='location') return `[位置分享] ${m.content}${m.meta&&m.meta.addr?'（'+m.meta.addr+'）':''}`;
   return m.content;
 }
