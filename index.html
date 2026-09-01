@@ -485,8 +485,12 @@ body{background:#0A0A0C;color:var(--text);
   display:flex;align-items:center;gap:5px;user-select:none;-webkit-user-select:none}
 .sysline b{font-weight:500;opacity:.7;font-size:11px}
 #phone.imm .sysline{background:var(--imm-veil);color:var(--imm-fg)}
-.failbar{align-self:center;margin:2px 0 6px;font-size:13px;color:var(--danger);display:flex;gap:10px;align-items:center}
-.failbar b{color:var(--accent);cursor:pointer}
+.failbar{align-self:stretch;margin:2px 0 6px;font-size:13px;color:var(--danger);display:flex;gap:10px;
+  align-items:flex-start;flex-wrap:wrap}
+/* 报错原文要能整段看到：换行保留、长串强制断行、可以选中复制 */
+.failbar .t{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word;
+  user-select:text;-webkit-user-select:text;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.6}
+.failbar b{color:var(--accent);cursor:pointer;flex:0 0 auto}
 
 /* 输入动效：角色气泡里 + 顶栏副标题 */
 .bubble.typing3{display:flex;gap:5px;align-items:center;padding:13px 15px}
@@ -2742,9 +2746,46 @@ weatherCv   display:block   top:0  h:643  盖到顶部:true   img:无
 
 实测：中间区域完全清晰，上下渐隐无硬边，顶栏文字和输入框都不受影响。
 
+### 2026-09-01（九）· 「拆分」入口常驻
+
+用户长按消息看不到拆分，怀疑是回滚滚错了。查下来代码一直在，是入口的显示条件写反了：
+
+```js
+if(m.type==='text' && splitSentences(m.content).length>1)   // ← 旧
+```
+
+拿 `splitSentences` **拆得开**当显示条件，等于用"自动能不能拆"去决定"手动能不能拆"。而 `splitSentences` 有三条不拆的规则（≤16 字、整段括号、两句且 ≤24 字），所以**恰好是自动没拆开的那些消息，长按也看不到入口** —— 这个手动出口对它唯一存在的场景永远不可用。
+
+改成 `if(m.type==='text')` 一律显示，拆不开的由 `splitMsg` 弹 toast 说明原因（「这条拆不开：没有可断句的标点」）。
+
+残留：整段没有句末标点的长句仍然拆不开，只是现在会告诉你为什么，而不是入口凭空消失。
+
+### 2026-09-01（十）· 让接口自己说话
+
+发送失败只报一句「接口返回了空内容」，连着猜了三轮都定不下来是什么原因 —— 因为 `callAPI` 把接口说的话全扔了：`finish_reason`、`usage`、200 响应里的 error body，一个都没留。
+
+改成先 `r.text()` 拿原文再解析，报错里带上：
+
+- `finish_reason`，并翻译成人话（`length` = prompt 太长没给输出留空间；`content_filter` = 被内容审核挡了；`tool_calls` = 返回的是工具调用）
+- `usage` 的 prompt / completion token 数
+- 截断到 900 字的**原始响应**
+
+顺带修两种以前会被误判成"空内容"的：
+
+- **中转返回 HTTP 200 + error body**（没有 choices）—— `r.ok` 是 true，旧代码直接掉进"空内容"分支
+- **推理型模型把正文放在 `reasoning_content`**，`content` 是空串 —— 现在自动取用；`content` 是多模态数组的也拼平
+
+失败横条（带「重试」那条）改成 `white-space:pre-wrap` + 可选中，加了「复制」按钮，长报错整段看得到也拿得走。toast 只放第一行，不然一个小气泡装不下。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **报错把原因吞了** → 「接口返回了空内容」这一句盖住了 `length` / `content_filter` / 中转 error body / 推理型模型放错字段四种完全不同的成因，连猜三轮都定不下来。**兜底的错误分支必须把上游原文带出来**，不然每次排查都从零开始。
+- **替换锚点吃掉了前缀** → 用 `function retry(){` 当锚点插新函数，实际匹配到的是 `async function retry(){` 的后半截，`async` 被留给了新插进去的 `copyFail`，`retry` 里的 `await` 当场语法错。**锚点要连着它前面的修饰符一起匹配**，`assert count==1` 拦不住这种。
+- **写文件顺手改了换行符** → Python `open(...,newline='')` 写回把整份 CRLF 变成 LF，浏览器无所谓，但和备份一 diff 就是 11205 行全变，等于看不了改动。**改别人的文件要按原样式写回。**
+
+- **手动出口用自动规则当显示条件** → 「拆分」菜单项的显示条件是 `splitSentences(...).length>1`，而它存在的意义正是补自动拆漏掉的那些。**给自动逻辑做手动兜底时，入口的显示条件绝不能复用同一套判断** —— 否则最需要它的场景恰好没有入口。
 
 - **WebGLProgram 当对象 key** → 三个 program 的 uniform 表全串成 `"[object WebGLProgram]"` 一个键。对象当 key 会被字符串化。
 - **渲染结果只有第一块是对的，其余全黑** → `gl.viewport(0, canvasH-H)` 的 y 是 GL 坐标（从底往上数），对应**图像顶部**；而拷贝时从图像底部 `canvasH-H` 取——只有 H 恰好等于画布高度时两者重合。sanctuary 原码同款隐患，它没炸只是因为它的画布尺寸基本不变。从 (0,0) 拷即可。
@@ -5788,7 +5829,8 @@ async function renderChat(toBottom){
         :bubbleHTML(m,cfg,isMe)}${rc}</span></div>
       ${m.fav?`<span class="favstar">${IC('star',13,1)}</span>`:''}</div>`;
   }).join('');
-  if(lastFail) html+=`<div class="failbar">${esc(lastFail)} <b onclick="retry()">重试</b></div>`;
+  if(lastFail) html+=`<div class="failbar"><span class="t">${esc(lastFail)}</span>
+    <b onclick="copyFail()">复制</b><b onclick="retry()">重试</b></div>`;
   box.innerHTML=html;
   if(typingOn){ const t=typingOn; typingOn=false; setTyping(t); }
   if(toBottom!==false) pinChatBottom();
@@ -5886,9 +5928,12 @@ function msgMenu(id){
       {ic:'smile',t:'贴个表情',fn:()=>pickReact(id)},
       {ic:'star',t:(m.fav?'取消收藏':'收藏'),fn:()=>toggleFav(id)}
     ];
-    // 模型偶尔还是会堆一条，给个手动拆的入口；拆过头了也能合回去
-    if(m.type==='text'&&splitSentences(m.content).length>1)
-      acts.push({ic:'select',t:`拆成 ${splitSentences(m.content).length} 条`,fn:()=>splitMsg(id)});
+    // 模型偶尔还是会堆一条，给个手动拆的入口；拆过头了也能合回去。
+    // 入口常驻：以前拿 splitSentences 的结果当显示条件，等于用"自动拆得开"去
+    // 决定"手动能不能拆"，恰好是自动没拆开的那些消息长按看不到入口。
+    // 现在一律显示，拆不开由 splitMsg 弹 toast 说明原因。
+    if(m.type==='text')
+      acts.push({ic:'select',t:'拆分',fn:()=>splitMsg(id)});
     if(m.type==='text'&&ms[idx+1]&&ms[idx+1].role===m.role&&ms[idx+1].type==='text')
       acts.push({ic:'quote',t:'和下一条合并',fn:()=>mergeMsg(id)});
     if(m.role==='assistant'){
@@ -5909,7 +5954,7 @@ async function splitMsg(id){
   const ms=await msgsOf(curCharId), m=ms.find(x=>x.id===id);
   if(!m) return;
   const parts=splitSentences(m.content);
-  if(parts.length<2) return toast('这条拆不开');
+  if(parts.length<2) return toast('这条拆不开：没有可断句的标点');
   // 第一段占用原消息，其余按 1ms 递增插在后面，保证顺序
   m.content=parts[0];
   await dbPut('messages',m);
@@ -10899,10 +10944,37 @@ async function callAPI(messages){
     method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.apiKey},
     body:JSON.stringify({model:S.model,messages,temperature:S.temperature,stream:false})
   });
-  if(!r.ok){ let d=''; try{d=(await r.json()).error?.message||''}catch(e){} throw new Error(`${r.status} ${d}`.trim()); }
-  const j=await r.json();
-  const txt=j.choices?.[0]?.message?.content;
-  if(!txt) throw new Error('接口返回了空内容');
+  // 先取原文再解析 —— 出错时接口说的话全在这里，解析失败也不能把它丢了。
+  // 以前只报一句「接口返回了空内容」，把 finish_reason、usage、error body 全吞了，没法排查。
+  const raw=await r.text();
+  let j=null; try{ j=JSON.parse(raw); }catch(e){}
+  const dump=()=>`
+────原始响应────
+`+String(raw).slice(0,900);
+  if(!r.ok){
+    const d=j?.error?.message||'';
+    throw new Error(`${r.status} ${d}`.trim()+dump());
+  }
+  // 有些中转会返回 HTTP 200 + error body，没有 choices
+  if(j&&j.error&&!j.choices) throw new Error('接口返回了错误：'+(j.error.message||'')+dump());
+  const ch=j?.choices?.[0];
+  let txt=ch?.message?.content;
+  // 推理型模型会把正文放进 reasoning_content，content 留空串
+  if(!txt&&ch?.message?.reasoning_content) txt=ch.message.reasoning_content;
+  // content 也可能是多模态数组
+  if(Array.isArray(txt)) txt=txt.map(x=>typeof x==='string'?x:(x?.text||'')).join('').trim();
+  if(!txt){
+    const why={length:'输出被截断：prompt 太长，没给回复留出空间',
+      content_filter:'被接口的内容审核挡了',
+      tool_calls:'模型返回的是工具调用，不是文本'}[ch?.finish_reason];
+    throw new Error('接口返回了空内容'
+      +`（finish_reason: ${ch?.finish_reason||'无'}）`
+      +(why?`
+`+why:'')
+      +(j?.usage?`
+用量 prompt ${j.usage.prompt_tokens} + 输出 ${j.usage.completion_tokens}`:'')
+      +dump());
+  }
   return txt;
 }
 /* 带类型的消息发给模型时转成文字 */
@@ -10992,11 +11064,18 @@ ${regenNote}
     if(document.hidden) pushNotify(c,parts.map(p=>p.content).join(' '));
     c.lastRead=Date.now(); await dbPut('characters',c); characters=await dbAll('characters');
   }catch(e){
-    lastFail='发送失败：'+e.message; toast(lastFail);
+    // 原文可能很长，toast 只放第一行，完整内容在下面的失败横条里（可复制）
+    lastFail='发送失败：'+e.message;
+    toast('发送失败：'+String(e.message).split(`
+`)[0].slice(0,60));
   }finally{
     setTyping(false);
     await renderChat();
   }
+}
+function copyFail(){
+  if(!lastFail) return;
+  navigator.clipboard?.writeText(lastFail).then(()=>toast('报错原文已复制'),()=>toast('复制失败，长按选中吧'));
 }
 async function retry(){ if(sending) return; lockSend(true); await requestReply(); lockSend(false); }
 function lockSend(v){
