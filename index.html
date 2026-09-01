@@ -2777,9 +2777,35 @@ if(m.type==='text' && splitSentences(m.content).length>1)   // ← 旧
 
 失败横条（带「重试」那条）改成 `white-space:pre-wrap` + 可选中，加了「复制」按钮，长报错整段看得到也拿得走。toast 只放第一行，不然一个小气泡装不下。
 
+### 2026-09-01（十一）· 提示词结构全面对齐 EVE
+
+扒完 EVE 混淆代码里的 `buildCharacterPrompt` 和 `callChatAPI`（string-array 混淆，解出 11021 条字符串表），把小手机的注入顺序改成和它完全一致：
+
+**system prompt 内部（新顺序）**：
+
+1. 预设 top → **世界书 before**（EVE 把它放在「你的角色与任务」之前，原来在角色名后面）
+2. 角色与任务 → 角色设定 → 当前情景（时间感知）
+3. **首要规则：输出格式**（大幅提前 —— EVE 是"格式规则前置 + 最后重申兜底"两头压，原来只在末尾）
+4. **忽略技术异常**（跟在格式规则后，EVE 同位置）
+5. 对话者身份 + 任务（EVE 把这两行放在格式规则之后，不在当前情景里）
+6. 记忆组（EVE 的 `DYNAMIC_MEMORY_PLACEHOLDER` 位）：核心 → 情景 → 摘要 → 心情日记 → 其他场景 → X 互动 → **挂载记忆殿后**（EVE 把挂载追加在占位符之后）
+7. 聊天方式 → 表情包 → 转账 → 撤回 → pov → 语气示例 → 预设 rules → 最后重申 → 预设 end
+
+**messages 数组（关键改动）**：世界书「after」不再拼进 system prompt，改成**独立的 system 消息，插在全部历史之后、这一轮用户消息之前** —— EVE 原话日志：「添加注入位置为"后"的世界书内容」。这个位置离生成最近，130 条历史冲不淡它，和酒馆 jb 位同理。最终结构：
+
+```
+[system: 角色+规则+记忆] [历史…] [system: 世界书after] [user: 本轮消息] [user: 预设jb]
+```
+
+实现上加了 `buildSystemPrompt(char,history,splitWb)` 第三参：requestReply 传 true 走拆分路径；主动消息、TA手机生成等一次性 prompt 的旧调用方不传，世界书仍然内联，行为不变。
+
+顺带修：注入胶囊的 total 以前漏算预设 jb（它是单独的 user 消息不在 sys 里），也没算独立下发的世界书 —— 用户对比 16000 字 vs 9503 token 时发现显示口径不全。现在 total = sys + 历史 + 世界书after + jb。（16000 字 ≈ 9500 token 本身不矛盾，中文约 0.6 token/字。）
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **注入统计只算 system 一条消息** → payload 里还有 jb（独立 user 消息）和独立下发的世界书，「本次注入」显示的比实际发出去的小。**统计口径必须覆盖整个 payload，不能只算拼进 sys 的部分。**
 
 - **报错把原因吞了** → 「接口返回了空内容」这一句盖住了 `length` / `content_filter` / 中转 error body / 推理型模型放错字段四种完全不同的成因，连猜三轮都定不下来。**兜底的错误分支必须把上游原文带出来**，不然每次排查都从零开始。
 - **替换锚点吃掉了前缀** → 用 `function retry(){` 当锚点插新函数，实际匹配到的是 `async function retry(){` 的后半截，`async` 被留给了新插进去的 `copyFail`，`retry` 里的 `await` 当场语法错。**锚点要连着它前面的修饰符一起匹配**，`assert count==1` 拦不住这种。
@@ -3524,7 +3550,7 @@ function presetOf(c){
   if(!id||id==='none') return null;
   return presetById(id);
 }
-let lastPresetJb='';
+let lastPresetJb='',lastWbAfter='';
 function presetParts(c){
   const P=presetOf(c);
   const out={top:'',char:'',rules:'',end:'',jb:'',n:0,chars:0,name:P?P.name:''};
@@ -10567,7 +10593,7 @@ function worldbookParts(char,history){
 }
 
 let lastInject={};
-function buildSystemPrompt(char,history){
+function buildSystemPrompt(char,history,splitWb){
   const me=personaOf(char);
   lastInject={};
   const lastUser=[...history].reverse().find(m=>m.role==='user');
@@ -10575,19 +10601,19 @@ function buildSystemPrompt(char,history){
   const wb=worldbookParts(char,history);
   const ps=presetParts(char);
   lastPresetJb=ps.jb;
+  // EVE 同款：插入位置为「后」的世界书不进 system prompt，由 requestReply 单独下发
+  lastWbAfter=splitWb?wb.after:'';
 
-  let p=`${ps.top?ps.top.trim()+'\n\n':''}你是一个专业的角色扮演者，能够根据角色人设、记忆和你们的关系，生成真实、自然的回复。
+  let p=`${ps.top?ps.top.trim()+'\n\n':''}${wb.before?wb.before.trim()+'\n\n':''}你是一个专业的角色扮演者，能够根据角色人设、记忆和你们的关系，生成真实、自然的回复。
 
 # **你的角色与任务**
-你现在扮演一个名为"${char.name}"的角色。${wb.before}
+你现在扮演一个名为"${char.name}"的角色。
 
 ## **角色设定:**
 ${char.bio||'（未填写）'}${ps.char}
 
 ## **当前情景:**`;
   if(S.timeAware) p+=timeContext(lastUser?lastUser.timestamp:null);
-  p+=`\n- **对话者:** 用户的名字是"${me.name}"`;
-  if((me.persona||'').trim()) p+=`，${me.persona.trim()}`;
   lastInject.bio={label:'角色设定',chars:(char.bio||'').length};
   lastInject.persona={label:'我的身份',chars:me.name.length+(me.persona||'').length};
   lastInject.time={label:'时间感知',chars:S.timeAware?timeContext(lastUser?lastUser.timestamp:null).length:0};
@@ -10605,13 +10631,8 @@ ${char.bio||'（未填写）'}${ps.char}
   lastInject.cross={label:'跨场景',chars:cross.length};
   lastInject.mount={label:'挂载记忆',chars:mount.length,n:(chatCfg(char).mountIds||[]).length};
   lastInject.preset={label:'预设'+(ps.name?' · '+ps.name:''),chars:ps.chars+ps.jb.length,n:ps.n};
-  p+=mem;
-  p+=ext;
-  p+=cross;
-  p+=mount;
-  p+=xc;
-  p+=wb.after;
-
+  /* EVE 顺序：当前情景之后立刻压格式规则和忽略异常，
+     然后才是对话者身份、记忆（EVE 的 DYNAMIC_MEMORY_PLACEHOLDER 位）、挂载 */
   p+=`
 
 # **首要规则：输出格式**
@@ -10626,6 +10647,20 @@ ${char.bio||'（未填写）'}${ps.char}
 - **错误2（非数组）：** \`"你好"\`
 - **错误3（外面套代码块，或在数组前后加解释文字）**
 - **错误4（拆成多个数组）：** 每行一个 \`["你好"]\` \`["在干嘛"]\` <== 只能有**一个**数组，多条消息放进同一个数组里
+
+## **重要：忽略技术异常**
+如果你在用户消息中看到任何乱码、随机字符串或无意义的字符组合，请完全忽略它们，只回应有意义的正常文字部分。`;
+  p+=`\n- **对话者身份:** 用户的名字是"${me.name}"`;
+  if((me.persona||'').trim()) p+=`，${me.persona.trim()}`;
+  p+=`\n- **任务:** 根据对话上下文，以你的角色身份进行自然回应。`;
+  // ―― EVE 的记忆占位符位置：核心 → 情景 → 摘要（mem 内部就是这个顺序）→ 动态 ――
+  p+=mem;
+  p+=ext;
+  p+=cross;
+  p+=xc;
+  p+=mount;
+  if(!splitWb) p+=wb.after;
+  p+=`
 
 # **聊天方式**
 - 一次输出 **2 到 ${S.maxMessages} 条**消息，像真人在手机上连发几条那样
@@ -10679,9 +10714,6 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 ${S.styleExamples.trim()}`;
   p+=ps.rules;
   p+=`
-
-# **忽略技术异常**
-如果你在用户消息中看到任何乱码、随机字符串或无意义的字符组合，请完全忽略它们，只回应有意义的正常文字部分。
 
 # **最后重申**
 你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。${
@@ -11010,7 +11042,7 @@ async function openMsgImage(id){
 async function requestReply(){
   const char=characters.find(x=>x.id===curCharId);
   const history=historyFor(char,await msgsOf(curCharId));
-  let sys=buildSystemPrompt(char,history);
+  let sys=buildSystemPrompt(char,history,true);
   if(regenNote) sys+=`
 
 # **⚠️ 用户对这次回复的额外要求**
@@ -11024,10 +11056,17 @@ ${regenNote}
   }
   lastInject.note=regenNote?{label:'重生成要求',chars:regenNote.length}:null;
   lastInject.cid=curCharId;
-  lastInject.total=sys.length+lastInject.history.chars;
+  lastInject.total=sys.length+lastInject.history.chars+lastWbAfter.length+lastPresetJb.length;
   updateInjectPill();
   const payload=[{role:'system',content:sys},
     ...history.map(m=>({role:m.role==='user'?'user':'assistant',content:msgToText(m)}))];
+  /* EVE 同款：插入位置为「后」的世界书作为独立 system 消息，
+     放在历史之后、这一轮用户消息之前 —— 离生成近，130 条历史冲不淡它 */
+  if(lastWbAfter){
+    let at=payload.length;
+    for(let i=payload.length-1;i>0;i--){ if(payload[i].role==='user') at=i; else break; }
+    payload.splice(at,0,{role:'system',content:lastWbAfter});
+  }
   // 预设里放在「对话最后」的条目 —— 酒馆的 jailbreak 位
   if(lastPresetJb) payload.push({role:'user',content:lastPresetJb});
   lastFail=null;
