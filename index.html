@@ -2824,6 +2824,12 @@ if(m.type==='text' && splitSentences(m.content).length>1)   // ← 旧
 
 评论功能查了下**本来就有**：X 帖子详情页底部有评论框，发出后角色会以小号口吻回复，且已记 xlog；朋友圈也有 `commentMoment`/`aiCommentMoment`。这次没重复做。
 
+### 2026-09-01（十三）· 回复节奏可调
+
+用户反馈连发像连珠炮。原来每条之间固定 `430ms+40ms/字`、封顶 1.6 秒 —— 40ms/字相当于每秒打 25 个字，确实是机器手速。
+
+改成四档（设置 → 对话 → 回复节奏）：快（≈旧行为）/ 正常（650+70/字，封顶3s，新默认）/ 慢 / 很慢。每条再带 ±20% 随机抖动，间隔期打字指示器照常显示，看起来就是"TA 在打字"。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -5383,6 +5389,13 @@ function renderSettings(){
       <div class="field"><label>按条数时带几条（角色单独设成「按条」时用）</label>
         <input id="s-hist" type="number" min="4" max="400" value="${S.historyCount}"></div>
       <div class="field"><label>单次最多回几条</label><input id="s-maxm" type="number" min="1" max="20" value="${S.maxMessages}"></div>
+      <div class="cell static"><div class="lbl">回复节奏</div>
+        <select class="pssel" id="s-pace">
+          <option value="fast" ${S.replyPace==='fast'?'selected':''}>快</option>
+          <option value="normal" ${!S.replyPace||S.replyPace==='normal'?'selected':''}>正常</option>
+          <option value="slow" ${S.replyPace==='slow'?'selected':''}>慢</option>
+          <option value="turtle" ${S.replyPace==='turtle'?'selected':''}>很慢</option>
+        </select></div>
       <div class="cell static"><div class="lbl">时间感知</div>
         <label class="switch"><input type="checkbox" id="s-time" ${S.timeAware?'checked':''}><i></i></label></div>
       <div class="cell static"><div class="lbl">纯对话模式</div>
@@ -5605,6 +5618,7 @@ async function saveSettings(){
     maxMessages:parseInt(v('s-maxm').value)||8,
     timeAware:v('s-time').checked, banNarration:v('s-ban').checked,
     visionEnabled:v('s-vision').checked, notifyOn:v('s-notify').checked,
+    replyPace:v('s-pace').value||'normal',
     accent:S.accent||'#7A68F0', showLog:S.showLog===true,
     memoryEnabled:v('s-mem').checked,
     memCore:parseInt(v('s-memcore').value)||0, memEpisodic:parseInt(v('s-memepi').value)||0,
@@ -11128,6 +11142,21 @@ async function openMsgImage(id){
   if(m&&m.meta&&m.meta.src) openViewer(m.meta.src);
 }
 
+/* 连发的每条之间停多久 —— 模拟"打字要时间"。
+   旧版固定 430+40/字、封顶1.6s，像连珠炮；现在按档位算，带 ±20% 抖动更像人 */
+const PACES={
+  fast:  {base:300, per:28,  cap:1300},
+  normal:{base:650, per:70,  cap:3000},
+  slow:  {base:1100,per:120, cap:4800},
+  turtle:{base:1700,per:180, cap:7500}
+};
+function paceDelay(len){
+  const pc=PACES[S.replyPace]||PACES.normal;
+  const raw=pc.base+len*pc.per;
+  const jit=.8+Math.random()*.4;          // 0.8x ~ 1.2x
+  return Math.min(pc.cap,Math.round(raw*jit));
+}
+
 async function requestReply(){
   const char=characters.find(x=>x.id===curCharId);
   const history=historyFor(char,await msgsOf(curCharId));
@@ -11186,7 +11215,7 @@ ${regenNote}
       if(povPart) row.meta={...row.meta,pov:String(povPart.content||'').slice(0,300)};
       await dbPut('messages',row);
       await renderChat();
-      await new Promise(r=>setTimeout(r,Math.min(1600,430+p.content.length*40)));
+      await new Promise(r=>setTimeout(r,paceDelay(p.content.length)));
     }
     const c=characters.find(x=>x.id===curCharId);
     if(document.hidden) pushNotify(c,parts.map(p=>p.content).join(' '));
