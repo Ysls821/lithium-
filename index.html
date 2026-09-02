@@ -2938,9 +2938,24 @@ reactions 一直只有用户能贴。现在模型也能贴：
 
 本地回归五条用例：只贴表情 / 贴完再说话 / 超长丢弃 / 历史带提示 / 无表情不加尾巴，全通过。
 
+### 2026-09-02（七）· 贴表情改成按消息 ID 精确指认
+
+上一版用「对方那条消息的前几个字」做模糊匹配来指认贴哪一条，两个问题：模型想反应的那句和实际贴上的常常不是同一条；而且允许「只贴表情不说话」，用户明确否掉了。
+
+重写规则：
+
+- **按 message_id 精确指认**。`toApiMessages` 给历史里**用户发的**消息加 `[ID:xxxxx]` 前缀（角色自己的消息和场景分隔条不标——贴表情只能贴对方的，标全部纯属浪费 token），模型照抄 ID 填进 `{"type":"react","emoji":"❤️","message_id":"xxxxx"}`
+- **ID 对不上就丢弃**，不再回退到「贴最后一条」瞎猜——猜错比不贴更糟
+- 提示词强调：贴的是**真正想回应的那一句**，不一定是最新的一条；三条之前那句让你心里一动就贴那条
+- **禁止只贴表情不说话**：数组里除表情对象外必须还有至少一条正常消息，违反则报「只贴了表情没说话」
+
+ID 标记是从 EVE 的引用回复机制借来的（它历史里每条都带 `[ID:xxx]`，模型用 message_id 引用），贴表情本身 EVE 没有。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **让模型用文本片段指认目标** → 「填那条消息的前几个字」看似省事，实际匹配到的常常不是它想指的那条。要模型精确指认某条历史记录，就得给它稳定的 ID 并在历史里标出来，匹配失败宁可丢弃也别回退到「最近一条」。
 
 - **新增的非消息型输出会撞上「空回复」判定** → 只贴表情不说话时 parts 为空，直接抛「没解析出内容」。凡是加不产生气泡的输出类型（react、recall、transfer_action），都要检查空判定那一行放不放行。
 
@@ -10950,12 +10965,15 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 退回时可以说一句为什么。不要主动张口要钱。
 
 # **给对方的消息贴表情**
-你可以给对方发的某条消息贴一个表情，就像微信长按贴表情那样。格式：
-\`{"type":"react","emoji":"❤️","to":"对方那条消息的前几个字"}\`
-- \`to\` 用来指认贴哪一条，填对方那条消息开头几个字；省略就贴最新的那条
+你可以给对方发过的**某一条具体消息**贴一个表情，就像微信长按贴表情那样。格式：
+\`{"type":"react","emoji":"❤️","message_id":"消息ID"}\`
+- **message_id 必须是历史里真实存在的 ID，不能编造**。历史中对方的每条消息前面都有 \`[ID:xxxxx]\` 标记，取 xxxxx 那部分填进去
+- **贴的是你真正想回应的那一句**，不一定是最新的一条 —— 对方三条之前说的那句让你心里一动，就贴那条
+- ID 对不上的会被直接丢弃，所以务必照抄历史里的标记
 - 常用：👍 ❤️ 😂 😮 😢 🔥 🙏 👀，也可以用别的
-- **可以只贴表情不说话**——比如对方说了句可爱的话，你就回一个 \`[{"type":"react","emoji":"❤️"}]\`
-- 也可以贴完再说：\`[{"type":"react","emoji":"😂","to":"我今天摔了一跤"}, "你没事吧哈哈哈"]\`
+- **贴表情不能代替说话**：数组里除了表情对象，**必须还有至少一条正常消息**
+- 正确：\`[{"type":"react","emoji":"😂","message_id":"m9x2k1ab"}, "你没事吧哈哈哈"]\`
+- 错误：\`[{"type":"react","emoji":"❤️","message_id":"m9x2k1ab"}]\`  ← 只贴表情不说话，不允许
 - 历史里标了「这条已被贴了表情」的，不要重复贴
 - **低频使用**，用在真的有反应的那句上，别每轮都贴
 
@@ -11059,32 +11077,27 @@ function toApiMessages(history){
   return history.map((m,i)=>{
     const role=m.role==='user'?'user':'assistant';
     const isReal=m.role==='user'&&m.type==='image'&&m.meta&&m.meta.real&&m.meta.src;
+    // 只给用户消息标 ID —— 贴表情只能贴对方发的，标全部纯属浪费 token
+    const tag=(m.role==='user'&&m.type!=='scene')?`[ID:${m.id}] `:'';
     if(isReal&&i>=start&&budget>0&&S.visionEnabled!==false){
       budget--;
       return {role,content:[
-        {type:'text',text:m.content?m.content:'（这是我发给你的图片，看看是什么）'},
+        {type:'text',text:tag+(m.content?m.content:'（这是我发给你的图片，看看是什么）')},
         {type:'image_url',image_url:{url:m.meta.src}}
       ]};
     }
-    return {role,content:msgToText(m)};
+    return {role,content:tag+msgToText(m)};
   });
 }
 
-/* 模型给你的消息贴表情 —— to 是目标消息的片段，匹配不到就贴最后一条你发的 */
+/* 模型给你的某条消息贴表情 —— 只认 message_id，对不上就丢弃。
+   以前用「前几个字」模糊匹配，模型想反应的那句和实际贴上的常常不是同一条 */
 async function aiReact(p){
+  const mid=String(p.mid||'').trim();
+  if(!mid) return;
   const ms=await msgsOf(curCharId);
-  const mine=ms.filter(m=>m.role==='user'&&m.type!=='scene');
-  if(!mine.length) return;
-  let target=null;
-  const to=String(p.to||'').trim();
-  if(to){
-    const key=to.slice(0,12);
-    for(let i=mine.length-1;i>=0;i--){
-      const c=String(mine[i].content||'');
-      if(c.includes(key)||key.includes(c.slice(0,12))){ target=mine[i]; break; }
-    }
-  }
-  if(!target) target=mine[mine.length-1];
+  const target=ms.find(m=>m.id===mid&&m.role==='user'&&m.type!=='scene');
+  if(!target){ console.warn('贴表情的 message_id 对不上，已忽略：',mid); return; }
   const e=String(p.content||'').trim(); if(!e) return;
   target.reactions=[...(target.reactions||[])];
   if(target.reactions.includes(e)) return;      // 已经贴过同一个就不重复
@@ -11163,7 +11176,8 @@ function normPart(x){
     if(ty==='react'||ty==='reaction'){
       const e=pick(x.emoji||x.content||x.text);
       // emoji 可能是多码位组合，放宽到 8 个字符；太长的当乱输出丢掉
-      return e&&e.length<=8?{type:'react',content:e,to:pick(x.to||x.target||'')}:null;
+      return e&&e.length<=8
+        ?{type:'react',content:e,mid:pick(x.message_id||x.messageId||x.mid||x.to||'')}:null;
     }
     if(ty==='xshare'||ty==='share_post'){
       const t=pick(x.text||x.post); if(!t) return null;
@@ -11445,11 +11459,7 @@ ${regenNote}
     if(leadPov&&seq.length&&!seq[0].pov) seq[0].pov=leadPov;
     let parts=seq.map(x=>x.p);
     let povPart=raw.find(p=>p.type==='pov')||null;
-    // 只贴了个表情、一句话没说 —— 这是正常行为，不是解析失败
-    if(!parts.length&&reacts.length){
-      for(const r of reacts) await aiReact(r);
-      return;                     // finally 里会收掉打字指示器并重渲染
-    }
+    if(!parts.length&&reacts.length) throw new Error('只贴了表情没说话');
     if(!parts.length) throw new Error('没解析出内容');
     for(const r of reacts) await aiReact(r);
     // 说好每次都带，模型漏了就单独补一次
