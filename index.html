@@ -2849,9 +2849,19 @@ if(m.type==='text' && splitSentences(m.content).length>1)   // ← 旧
 
 修法：把**上一个镜头喂回去当场景锚**。主提示词的镜头规则里动态注入「上一个镜头是『…』，新镜头必须和它连续（地点/时间/姿势），除非对话里明确移动了」；兜底调用补上最近 8 条对话 + 上一个镜头。POV 本身就是场景状态，回灌它 = 零成本的场景连续性，不用额外 API。
 
+### 2026-09-02 · 识图没接上主路径；性别乱猜
+
+**① 真图从来没发给过模型（主聊天）**。`toApiMessages()` 把最近 6 条里的至多 3 张真图按多模态 `image_url` 格式带上——函数是对的，但只有「主动消息」那条路在用；主聊天 requestReply 用的是 `msgToText`，真图到模型手里永远是一句 `[图片]+说明`。功能存在、路径没接，用户的原话「只做了个架子」完全准确。改一行：requestReply 的 payload 换用 `toApiMessages(history)`。
+
+**② 角色把用户当男的**。对话者身份只有一行、埋在大 prompt 中间，用户身份设定里没写性别时模型自由发挥。改法：身份设定升格为「TA 的身份设定：…」，并紧跟一条硬约束——性别/称呼/身份只以对话者身份为准，没写明的保持中性，**绝对不要自行假设**。
+
+注：想让角色稳定叫对性别，还是要在「我的身份」里写明（如"女生，叫我小仪"）——约束只能拦住乱猜，给不了它没有的信息。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **功能函数写对了但主路径没接** → 多模态识图的 toApiMessages 只被次要路径（主动消息）引用，主聊天仍走文字降级，功能形同虚设。**写完新管线要 grep 所有 payload 组装点，确认每条路都换上了**——只测函数不测接线，架子就是这么来的。
 
 - **兜底路径的上下文远少于主路径** → 补拍镜头的 prompt 只有 bio+当次消息，没有历史，生成的场景和剧情脱节。**任何"重试/补生成"路径都要检查它拿到的上下文是不是和主路径同一套**——兜底不是降级的借口。
 
@@ -10754,7 +10764,8 @@ ${char.bio||'（未填写）'}${ps.char}
 ## **重要：忽略技术异常**
 如果你在用户消息中看到任何乱码、随机字符串或无意义的字符组合，请完全忽略它们，只回应有意义的正常文字部分。`;
   p+=`\n- **对话者身份:** 用户的名字是"${me.name}"`;
-  if((me.persona||'').trim()) p+=`，${me.persona.trim()}`;
+  if((me.persona||'').trim()) p+=`。TA 的身份设定：${me.persona.trim()}`;
+  p+=`\n- 对方的性别、称呼、身份**只以上面「对话者身份」为准**。身份设定里没写明的，保持中性表达——**绝对不要自行假设对方的性别**，也不要用错人称和称呼`;
   p+=`\n- **任务:** 根据对话上下文，以你的角色身份进行自然回应。`;
   // ―― EVE 的记忆占位符位置：核心 → 情景 → 摘要（mem 内部就是这个顺序）→ 动态 ――
   p+=mem;
@@ -11207,8 +11218,9 @@ ${regenNote}
   lastInject.cid=curCharId;
   lastInject.total=sys.length+lastInject.history.chars+lastWbAfter.length+lastPresetJb.length;
   updateInjectPill();
-  const payload=[{role:'system',content:sys},
-    ...history.map(m=>({role:m.role==='user'?'user':'assistant',content:msgToText(m)}))];
+  // toApiMessages 会把最近的真图按多模态 image_url 带上 —— 以前这里用的是
+  // msgToText，图片全被降级成一句"[图片]"，识图功能等于没接（主动消息那条路反而接了）
+  const payload=[{role:'system',content:sys},...toApiMessages(history)];
   /* EVE 同款：插入位置为「后」的世界书作为独立 system 消息，
      放在历史之后、这一轮用户消息之前 —— 离生成近，130 条历史冲不淡它 */
   if(lastWbAfter){
