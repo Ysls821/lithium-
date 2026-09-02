@@ -2922,9 +2922,27 @@ else if('）)】”"」'.includes(ch)) depth--;     // 也在这里，但 else-i
 
 补齐：`chat.memCore` / `chat.memEpisodic` / `chat.memEvery`，角色级优先、填 0 跟随全局（和读取轮数同一套约定），聊天设置页加三个输入框并写清当前全局值。
 
+### 2026-09-02（六）· 角色会主动给你的消息贴表情
+
+reactions 一直只有用户能贴。现在模型也能贴：
+
+```json
+{"type":"react","emoji":"❤️","to":"对方那条消息的前几个字"}
+```
+
+- `to` 用来指认贴哪一条（拿片段模糊匹配你发过的消息），省略就贴最新那条
+- **可以只贴表情不说话** —— 这种整轮没有文字气泡的回复，以前会被当成「没解析出内容」抛错，现在单独放行，贴完直接收尾
+- 贴表情不占气泡：在主循环里先从 parts 里抽走，不进消息流
+- `msgToText` 给带表情的消息加上「这条已被贴了表情：❤️」，模型看得见就不会一直重复贴；同一条已有相同 emoji 也会跳过
+- emoji 放宽到 8 字符（多码位组合），再长视为乱输出丢弃
+
+本地回归五条用例：只贴表情 / 贴完再说话 / 超长丢弃 / 历史带提示 / 无表情不加尾巴，全通过。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **新增的非消息型输出会撞上「空回复」判定** → 只贴表情不说话时 parts 为空，直接抛「没解析出内容」。凡是加不产生气泡的输出类型（react、recall、transfer_action），都要检查空判定那一行放不放行。
 
 - **同一个设置页里两套覆盖规矩** → 轮数、摘要是角色级可覆盖，记忆条数和提取间隔却只有全局，用户自然会觉得「角色设置没用」。一组同类设置要么全支持角色级覆盖，要么在 UI 上明确标出哪些是全局唯一。
 - **用户报的位置不一定是真实位置** → 她说「读取轮数没用」，实测轮数完全正常，真正只有全局生效的是隔壁的记忆条数。先验证她指的那个，再顺着同一页找同类问题。
@@ -10931,6 +10949,16 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 卡片本身会显示状态，你再复述一遍很假。想说话就说别的（道谢、调侃、或者干脆岔开）。
 退回时可以说一句为什么。不要主动张口要钱。
 
+# **给对方的消息贴表情**
+你可以给对方发的某条消息贴一个表情，就像微信长按贴表情那样。格式：
+\`{"type":"react","emoji":"❤️","to":"对方那条消息的前几个字"}\`
+- \`to\` 用来指认贴哪一条，填对方那条消息开头几个字；省略就贴最新的那条
+- 常用：👍 ❤️ 😂 😮 😢 🔥 🙏 👀，也可以用别的
+- **可以只贴表情不说话**——比如对方说了句可爱的话，你就回一个 \`[{"type":"react","emoji":"❤️"}]\`
+- 也可以贴完再说：\`[{"type":"react","emoji":"😂","to":"我今天摔了一跤"}, "你没事吧哈哈哈"]\`
+- 历史里标了「这条已被贴了表情」的，不要重复贴
+- **低频使用**，用在真的有反应的那句上，别每轮都贴
+
 # **撤回**
 你可以撤回自己刚发出去的消息，就像微信一样。格式：\`{"type":"recall"}\`
 - 用在：说错话、后悔、觉得太肉麻、想改口、故意欲盖弥彰
@@ -11042,6 +11070,29 @@ function toApiMessages(history){
   });
 }
 
+/* 模型给你的消息贴表情 —— to 是目标消息的片段，匹配不到就贴最后一条你发的 */
+async function aiReact(p){
+  const ms=await msgsOf(curCharId);
+  const mine=ms.filter(m=>m.role==='user'&&m.type!=='scene');
+  if(!mine.length) return;
+  let target=null;
+  const to=String(p.to||'').trim();
+  if(to){
+    const key=to.slice(0,12);
+    for(let i=mine.length-1;i>=0;i--){
+      const c=String(mine[i].content||'');
+      if(c.includes(key)||key.includes(c.slice(0,12))){ target=mine[i]; break; }
+    }
+  }
+  if(!target) target=mine[mine.length-1];
+  const e=String(p.content||'').trim(); if(!e) return;
+  target.reactions=[...(target.reactions||[])];
+  if(target.reactions.includes(e)) return;      // 已经贴过同一个就不重复
+  target.reactions.push(e);
+  await dbPut('messages',target);
+  await renderChat(false);
+}
+
 /* 模型处理你发的转账 */
 async function aiTfAct(action){
   const st=action==='accept'||action==='accepted'?'accepted':'rejected';
@@ -11109,6 +11160,11 @@ function normPart(x){
       { const c=pick(x.content||x.text); return c?{type:'voice',content:c}:null; }
     if(ty==='pov')
       { const c=pick(x.content||x.text); return c?{type:'pov',content:c}:null; }
+    if(ty==='react'||ty==='reaction'){
+      const e=pick(x.emoji||x.content||x.text);
+      // emoji 可能是多码位组合，放宽到 8 个字符；太长的当乱输出丢掉
+      return e&&e.length<=8?{type:'react',content:e,to:pick(x.to||x.target||'')}:null;
+    }
     if(ty==='xshare'||ty==='share_post'){
       const t=pick(x.text||x.post); if(!t) return null;
       return {type:'xsh',content:pick(x.comment||''),xtext:t};
@@ -11285,7 +11341,9 @@ async function callAPI(messages){
 function msgToText(m){
   if(m.recalled) return m.role==='user'?'[对方撤回了一条消息]':'[你撤回了一条消息]';
   const q=m.quote?`[引用 ${m.quote.name}："${m.quote.text}"] `:'';
-  return q+msgBody(m);
+  // 已贴的表情要让模型看见，否则它会一直重复贴同一条
+  const rc=(m.reactions&&m.reactions.length)?`　[这条已被贴了表情：${m.reactions.join('')}]`:'';
+  return q+msgBody(m)+rc;
 }
 function msgBody(m){
   if(m.type==='image'){
@@ -11374,8 +11432,9 @@ ${regenNote}
     if(!raw.length) throw new Error('没解析出内容');
     /* 镜头逐条化：pov 挂到它前面那条消息上；出现在最前面的给第一条。
        旧格式（整轮一个、放最后）会天然落到最后一条，靠下面的回填铺满全轮 */
-    const seq=[]; let leadPov=null;
+    const seq=[]; let leadPov=null; const reacts=[];
     for(const p of raw){
+      if(p.type==='react'){ reacts.push(p); continue; }   // 贴表情不是消息，不占气泡
       if(p.type==='pov'){
         const t=String(p.content||'').slice(0,300);
         if(seq.length) seq[seq.length-1].pov=t; else leadPov=t;
@@ -11386,7 +11445,13 @@ ${regenNote}
     if(leadPov&&seq.length&&!seq[0].pov) seq[0].pov=leadPov;
     let parts=seq.map(x=>x.p);
     let povPart=raw.find(p=>p.type==='pov')||null;
+    // 只贴了个表情、一句话没说 —— 这是正常行为，不是解析失败
+    if(!parts.length&&reacts.length){
+      for(const r of reacts) await aiReact(r);
+      return;                     // finally 里会收掉打字指示器并重渲染
+    }
     if(!parts.length) throw new Error('没解析出内容');
+    for(const r of reacts) await aiReact(r);
     // 说好每次都带，模型漏了就单独补一次
     if(!povPart&&chatCfg(char).povEnabled){
       try{
