@@ -2907,9 +2907,27 @@ else if('）)】”"」'.includes(ch)) depth--;     // 也在这里，但 else-i
 - 主提示词同步告知，禁止说「发消息」「看手机」这类隔屏才有的话
 - 补拍镜头的兜底 prompt 同样跟随模式
 
+### 2026-09-02（五）· 角色级记忆设置以前是摆设
+
+用户怀疑「角色聊天设置里的读取轮数没用，只有全局管用」。查证：
+
+**读取轮数是好的。** 浏览器里实测 `historyFor`：角色设 4 轮→取 8 条、设 0→跟随全局 12 轮取 24 条、设 30→取 60 条；走完整保存链路（openChatSet → setCfg → persistCfg）落库 `histTurns:5`，再存一次角色基础信息也没被冲掉。
+
+**但她的直觉没错，只是错位到了记忆上** —— 这三项确实只有全局生效：
+
+- `memoryText()` 只读 `S.memCore` / `S.memEpisodic`，角色级压根没有对应字段
+- `memAutoTick()` 的提取间隔只读 `S.memEvery`，角色级只有一个开关
+
+对比之下摘要的 `sumEvery` / `sumKeep` 早就是角色级的——同一个设置页里两套规矩，难怪感觉不对。
+
+补齐：`chat.memCore` / `chat.memEpisodic` / `chat.memEvery`，角色级优先、填 0 跟随全局（和读取轮数同一套约定），聊天设置页加三个输入框并写清当前全局值。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **同一个设置页里两套覆盖规矩** → 轮数、摘要是角色级可覆盖，记忆条数和提取间隔却只有全局，用户自然会觉得「角色设置没用」。一组同类设置要么全支持角色级覆盖，要么在 UI 上明确标出哪些是全局唯一。
+- **用户报的位置不一定是真实位置** → 她说「读取轮数没用」，实测轮数完全正常，真正只有全局生效的是隔壁的记忆条数。先验证她指的那个，再顺着同一页找同类问题。
 
 - **同一个字符既是开又是闭，却用计数器处理** → 直引号在开/闭两个集合里都写了，else-if 短路导致只增不减，depth 永久卡死。成对符号用计数，同形符号（直引号、单引号、反引号、星号、下划线）必须用布尔翻转。
 - **概率性 bug 会被当成模型不稳定** → 拆分时灵时不灵，第一反应是「模型输出格式随机」，实际是引号触发的确定性代码 bug。「有时候行有时候不行」要先找输入里的差异变量，别急着归因给模型。
@@ -3072,6 +3090,7 @@ const DEFAULT_CHAT={
   histMode:'turn', histTurns:0,
   journalShare:false, journalRate:20, presetId:'', povEnabled:false, memAuto:true, noScrim:false,
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
+  memCore:0, memEpisodic:0, memEvery:0,      // 0=跟随全局
   xdmEnabled:false, xdmRate:15, xdmHours:6,
   avatarRadius:50, textMe:'', textTa:'',
   proEnabled:false, proMinutes:60, proDaily:5,
@@ -5422,9 +5441,10 @@ function mountedMemText(char){
 let memAutoBusy=false;
 async function memAutoTick(){
   if(memAutoBusy||sending||!db||!S.memAuto) return;
-  const every=Math.max(4,+S.memEvery||12);
   for(const c of characters){
-    if(chatCfg(c).memAuto===false) continue;  // 这个角色单独关掉了（比如纯记事用的）
+    const _g=chatCfg(c);
+    if(_g.memAuto===false) continue;  // 这个角色单独关掉了（比如纯记事用的）
+    const every=Math.max(4,+_g.memEvery||+S.memEvery||12);   // 角色级优先
     const ms=await msgsOf(c.id);
     if(ms.length<every) continue;
     const done=c.memAt||0;                    // 上次提取时处理到第几条
@@ -6550,8 +6570,18 @@ function renderChatSet(){
           纯记事、不需要 TA 记住的对话就关掉</div></div>
         <label class="switch"><input type="checkbox" ${g.memAuto!==false?'checked':''}
           onchange="setCfg('memAuto',this.checked,true)"><i></i></label></div>
+      <div class="field"><label>核心记忆带几条</label>
+        <input type="number" min="0" max="50" value="${g.memCore||0}"
+          oninput="setCfg('memCore',parseInt(this.value)||0,true)"></div>
+      <div class="field"><label>情景记忆带几条</label>
+        <input type="number" min="0" max="50" value="${g.memEpisodic||0}"
+          oninput="setCfg('memEpisodic',parseInt(this.value)||0,true)"></div>
+      ${g.memAuto!==false?`<div class="field"><label>每聊多少条提取一次</label>
+        <input type="number" min="0" max="80" value="${g.memEvery||0}"
+          oninput="setCfg('memEvery',parseInt(this.value)||0,true)"></div>`:''}
     </div>
-    <div class="hint">关掉后这个角色不再自动提取记忆，也不会消耗额度。全局开关在 设置 → 记忆。</div>
+    <div class="hint">三个数字填 <b>0</b> 跟随全局（现在是 ${S.memCore} 条 / ${S.memEpisodic} 条 / 每 ${S.memEvery||12} 条提一次）。<br>
+      关掉开关后这个角色不再自动提取记忆，也不会消耗额度。全局设置在 设置 → 记忆。</div>
 
     <div class="grouptitle">故事线摘要</div>
     <div class="group">
@@ -10730,8 +10760,11 @@ function timeContext(lastUserTs){
 function memoryText(cid){
   if(!S.memoryEnabled) return '';
   const list=memsOf(cid);
-  const core=list.filter(m=>m.type==='core').sort((a,b)=>b.importance-a.importance||b.timestamp-a.timestamp).slice(0,S.memCore);
-  const epi=list.filter(m=>m.type==='episodic').sort((a,b)=>b.timestamp-a.timestamp).slice(0,S.memEpisodic);
+  // 角色级优先，0 跟随全局 —— 和「读取轮数」同一套约定
+  const _g=chatCfg(characters.find(x=>x.id===cid));
+  const nCore=_g.memCore||S.memCore, nEpi=_g.memEpisodic||S.memEpisodic;
+  const core=list.filter(m=>m.type==='core').sort((a,b)=>b.importance-a.importance||b.timestamp-a.timestamp).slice(0,nCore);
+  const epi=list.filter(m=>m.type==='episodic').sort((a,b)=>b.timestamp-a.timestamp).slice(0,nEpi);
   let s='';
   if(core.length) s+=`\n\n【核心记忆】关于对方，你一直记得的事：\n`+core.map((m,i)=>`${i+1}. ${m.content}`).join('\n');
   if(epi.length)  s+=`\n\n【情景记忆】最近发生过的事：\n`+epi.map((m,i)=>`${i+1}. ${m.content}`).join('\n');
