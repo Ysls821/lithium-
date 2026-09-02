@@ -2951,9 +2951,26 @@ reactions 一直只有用户能贴。现在模型也能贴：
 
 ID 标记是从 EVE 的引用回复机制借来的（它历史里每条都带 `[ID:xxx]`，模型用 message_id 引用），贴表情本身 EVE 没有。
 
+### 2026-09-02（八）· 429 限流：请求闸门 + 自动退避重试
+
+用户复现出干净的 `429 rate_limit_exceeded`。三处一起改：
+
+**① 请求闸门** `apiSlot()`：保证任意两个请求的**起跑时间**至少隔 900ms。不做完整串行——那样一个后台慢摘要会卡住用户发送；只把"同一秒并发"削成"排队"。实测五个同时开火的请求被摊成 0/906/1810/2717/3623ms。
+
+**② 429/503/529 自动退避重试**两次（3s → 8s，有 `Retry-After` 就听它的，上限 20s）。以前一遇限流就直接失败，用户得手动重来。
+
+**③ 定时器错峰**：原来 60/60/60/90/150 秒，每 450 秒所有任务撞在同一秒。改成互质周期 67/71/83/97/151 秒，且启动时间各自延后 5/19/33/47/61/79 秒。
+
+另外补上 429 的人话提示：配额用完 or 图片太吃 token，并指路怎么关后台提取减负。
+
+**注意**：识图接进主链路后真图会真的发出去，一张图上千 token，TPM 限额会明显更容易撞到。这是这次 429 变频繁的可能诱因之一。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **多个定时器用整数倍周期** → 60/60/60/90/150 秒看着错开，实际每 450 秒全部对齐，瞬间打出五个请求。多个后台任务的周期要取互质值，启动时间也要错峰。
+- **可恢复的错误直接抛给用户** → 429/503 本质是「等一下就好」，以前一撞就报失败让用户手动重来。这类状态码应该自动退避重试，重试用尽再报错。
 
 - **让模型用文本片段指认目标** → 「填那条消息的前几个字」看似省事，实际匹配到的常常不是它想指的那条。要模型精确指认某条历史记录，就得给它稳定的 ID 并在历史里标出来，匹配失败宁可丢弃也别回退到「最近一条」。
 
@@ -11311,13 +11328,40 @@ function parseReplyRaw(text){
     return s?[{type:'text',content:s}]:[];
   }).filter(Boolean);
 }
-async function callAPI(messages){
+/* ---------- 请求闸门 ----------
+   七个后台定时器全在 init 里挨着注册，60/90/150 秒的倍数会周期性对齐，
+   一秒内打出四五个请求 —— 免费档 RPM 3-20 直接 429。
+   这里不做完整串行（后台一个慢摘要会卡住用户发送），只保证任意两个请求
+   的**起跑时间**至少隔开 API_MIN_GAP，把并发削成排队。 */
+const API_MIN_GAP=900;
+let _apiLast=0, _apiChain=Promise.resolve();
+function apiSlot(){
+  _apiChain=_apiChain.then(async()=>{
+    const wait=API_MIN_GAP-(Date.now()-_apiLast);
+    if(wait>0) await new Promise(r=>setTimeout(r,wait));
+    _apiLast=Date.now();
+  });
+  return _apiChain;
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+async function callAPI(messages,_try){
   if(!S.apiKey) throw new Error('还没填 API Key');
   if(!S.apiBase) throw new Error('还没填 API 地址');
+  await apiSlot();
   const r=await fetch(S.apiBase.replace(/\/+$/,'')+'/chat/completions',{
     method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.apiKey},
     body:JSON.stringify({model:S.model,messages,temperature:S.temperature,stream:false})
   });
+  // 429/503 是"等一下就好"，自动退避重试两次，别让用户手动重来
+  const n=+_try||0;
+  if((r.status===429||r.status===503||r.status===529)&&n<2){
+    const ra=parseFloat(r.headers.get('retry-after'));
+    const wait=Number.isFinite(ra)&&ra>0?Math.min(ra*1000,20000):(n===0?3000:8000);
+    console.warn('限流 '+r.status+'，'+Math.round(wait/1000)+'s 后重试（第'+(n+1)+'次）');
+    await sleep(wait);
+    return callAPI(messages,n+1);
+  }
   // 先取原文再解析 —— 出错时接口说的话全在这里，解析失败也不能把它丢了。
   // 以前只报一句「接口返回了空内容」，把 finish_reason、usage、error body 全吞了，没法排查。
   const raw=await r.text();
@@ -11327,7 +11371,10 @@ async function callAPI(messages){
 `+String(raw).slice(0,900);
   if(!r.ok){
     const d=j?.error?.message||'';
-    throw new Error(`${r.status} ${d}`.trim()+dump());
+    const hint=r.status===429
+      ?String.fromCharCode(10)+'已自动重试 2 次仍被限流。要么是接口的每分钟请求/token 配额用完了，要么是发的图太多——图片很吃 token。可以到 设置→记忆 关掉自动提取、或聊天设置里关掉这个角色的自动提取来减少后台请求。'
+      :'';
+    throw new Error(`${r.status} ${d}`.trim()+hint+dump());
   }
   // 有些中转会返回 HTTP 200 + error body，没有 choices
   if(j&&j.error&&!j.choices) throw new Error('接口返回了错误：'+(j.error.message||'')+dump());
@@ -11710,12 +11757,13 @@ async function ensurePersona(){
   initKeyboardFix();
   initSwipeQuote();
   tickClock(); setInterval(tickClock,20000);
-  setInterval(proactiveTick,60000);
-  setInterval(autoDiaryTick,60000);
-  setInterval(journalTick,60000);
-  setInterval(journalAutoTick,10*60000);
-  setInterval(memAutoTick,90000);
-  setInterval(sumAutoTick,150000);
+  /* 周期互质 + 启动错峰：原来 60/60/60/90/150 每 450 秒就全撞在同一秒 */
+  setTimeout(()=>setInterval(proactiveTick,67000),5000);
+  setTimeout(()=>setInterval(autoDiaryTick,71000),19000);
+  setTimeout(()=>setInterval(journalTick,83000),33000);
+  setTimeout(()=>setInterval(journalAutoTick,10*60000+11000),47000);
+  setTimeout(()=>setInterval(memAutoTick,97000),61000);
+  setTimeout(()=>setInterval(sumAutoTick,151000),79000);
   setTimeout(memAutoTick,20000);
   setInterval(xDmTick,7*60000);
   setTimeout(journalAutoTick,8000);
