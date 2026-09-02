@@ -2869,9 +2869,22 @@ if(m.type==='text' && splitSentences(m.content).length>1)   // ← 旧
 
 要生效需在 身份 → 编辑 里选一次性别。
 
+### 2026-09-02（三）· 镜头逐条跟拍
+
+用户报的现象：一轮连发里前几条点头像是「上一轮的镜头」、后几条显示「没有镜头记录」。根源两个：镜头本来就是**整轮一个**挂到每条上，她看到的分界其实是两轮的交界；而新一轮没镜头，是模型漏拍后**补拍的那次 API 调用失败被 `catch(e){}` 静默吞了**——整轮裸奔。
+
+按用户的提议改成**逐条跟拍**：
+
+- 提示词：每条消息后面紧跟一个 pov 对象，拍发那一条时的画面，20-80 字，**镜头随消息推进**（上一条快哭了、下一条哭出来，镜头就拍眼泪掉下来）；画面没变可省略
+- 解析：pov 挂到它前面那条消息上；出现在最前的给第一条；旧格式（整轮一个放最后）天然落到最后一条
+- 回填：顺填（省略的沿用上一个）+ 倒填开头空档 + 补拍的挂到末条——**保证整轮每条都有记录**，不再有"没有镜头记录"
+- 场景锚自动升级：注回提示词的「上一个镜头」现在取的是上轮最后一条的镜头，正好是最新状态
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **静默吞掉的兜底失败会伪装成别的 bug** → 补拍镜头失败被 catch(e){} 吞了，用户看到的是「后几条没有镜头记录」，报出来像存储问题，实际是 API 调用没成。**兜底路径失败至少要 console.warn**，不然排查方向直接歪掉。
 
 - **关键事实靠自然语言描述承载** → 性别藏在自由文本身份描述里，没写就没了，写了也会被百条历史冲淡。模型必须一直记住的事实要做成结构化字段，并注入到离生成最近的位置——顶部 system 是给背景用的，不是给「此刻不能错」的事用的。
 
@@ -10845,14 +10858,16 @@ ${_liPub.slice(0,6).map(x=>'- '+String(x.text).slice(0,50)).join(String.fromChar
   const _cfgPov=chatCfg(char);
   if(_cfgPov.povEnabled) p+=`
 
-# **第三视角镜头（每次都必须有）**
-数组的**最后一个元素**永远是这个对象：\`{"type":"pov","content":"..."}\`
-- content 是**第三人称旁观视角**的一段描写：你发这几条消息时正在做什么、什么姿势和表情、身边的环境光线声音，60-120 字
+# **第三视角镜头（逐条跟拍）**
+在**每条消息后面**紧跟一个镜头对象：\`{"type":"pov","content":"..."}\`，拍你发**那一条**时的画面
+- content 是第三人称旁观描写：那一刻你在做什么、姿势表情、环境光线声音，20-80 字
+- 镜头要跟着消息**推进**：上一条快哭了，下一条哭出来，镜头就拍眼泪掉下来——动作是连续演变的，不要每条复制同一段
+- 相邻两条画面确实没变时，后一条的镜头可以省略（会自动沿用上一个）
 - 像小说里的旁白，具体、有画面感，不要抒情堆砌
 - **画面要贴合当前剧情**：对话里聊到在哪、在做什么，镜头就拍那里，不要凭空编一个无关场景
-- 这个对象**不会**作为消息显示给对方，只是镜头记录
-- **没有它就是格式错误**。哪怕这轮只回一个字，也要带上镜头对象
-- 正确示例：\`["嗯", "在呢", {"type":"pov","content":"他把手机搁在膝盖上……"}]\``;
+- 镜头对象**不会**显示给对方，只是记录
+- **整轮至少要有一个镜头**，一个都没有就是格式错误
+- 正确示例：\`["别走", {"type":"pov","content":"他抓住她的手腕，指节泛白"}, "求你了", {"type":"pov","content":"声音哑了，眼眶红着"}]\``;
   if(_cfgPov.povEnabled){
     // 场景锚：把上一个镜头喂回去，新镜头必须接得上 —— 不然模型每次都重掷一个场景
     const _lp=[...history].reverse().find(m=>m.role==='assistant'&&m.meta&&m.meta.pov);
@@ -10870,7 +10885,7 @@ ${S.styleExamples.trim()}`;
 
 # **最后重申**
 你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。${
-    _cfgPov.povEnabled?'\n数组的最后一个元素**必须**是 `{"type":"pov","content":"..."}` 镜头对象。':''}`;
+    _cfgPov.povEnabled?'\n每条消息后面跟上 `{"type":"pov","content":"..."}` 镜头对象，整轮至少一个。':''}`;
   // 历史越长，开头的格式规则越容易被冲淡 —— 在最末尾再压一遍
   if(history&&history.length>40) p+=`
 
@@ -11260,10 +11275,22 @@ ${regenNote}
   lastFail=null;
   setTyping(true);
   try{
-    let parts=parseReply(await callAPI(payload));
-    if(!parts.length) throw new Error('没解析出内容');
-    let povPart=parts.find(p=>p.type==='pov');
-    parts=parts.filter(p=>p.type!=='pov');
+    const raw=parseReply(await callAPI(payload));
+    if(!raw.length) throw new Error('没解析出内容');
+    /* 镜头逐条化：pov 挂到它前面那条消息上；出现在最前面的给第一条。
+       旧格式（整轮一个、放最后）会天然落到最后一条，靠下面的回填铺满全轮 */
+    const seq=[]; let leadPov=null;
+    for(const p of raw){
+      if(p.type==='pov'){
+        const t=String(p.content||'').slice(0,300);
+        if(seq.length) seq[seq.length-1].pov=t; else leadPov=t;
+        continue;
+      }
+      seq.push({p,pov:null});
+    }
+    if(leadPov&&seq.length&&!seq[0].pov) seq[0].pov=leadPov;
+    let parts=seq.map(x=>x.p);
+    let povPart=raw.find(p=>p.type==='pov')||null;
     if(!parts.length) throw new Error('没解析出内容');
     // 说好每次都带，模型漏了就单独补一次
     if(!povPart&&chatCfg(char).povEnabled){
@@ -11287,11 +11314,21 @@ ${_lp?`上一个镜头（你刚才的状态）：「${String(_lp.meta.pov).slice
         if(t) povPart={type:'pov',content:t};
       }catch(e){}
     }
-    for(const p of parts){
+    // 补拍的镜头挂到最后一条；然后顺填（画面没变沿用上一个）+ 倒填开头空档，
+    // 保证整轮每条消息点头像都有记录，不再出现"后几条没有镜头"
+    if(povPart&&!seq.some(x=>x.pov)&&seq.length)
+      seq[seq.length-1].pov=String(povPart.content||'').slice(0,300);
+    {
+      let _cur=null;
+      for(const it of seq){ if(it.pov) _cur=it.pov; else it.pov=_cur; }
+      for(let i=seq.length-2;i>=0;i--) if(!seq[i].pov) seq[i].pov=seq[i+1].pov;
+    }
+    for(const it of seq){
+      const p=it.p;
       if(p.type==='recall'){ await doAiRecall(); continue; }
       if(p.type==='transfer_action'){ await aiTfAct(p.content); continue; }
       const row={id:uid(),characterId:curCharId,role:'assistant',...toMsg(p),timestamp:Date.now()};
-      if(povPart) row.meta={...row.meta,pov:String(povPart.content||'').slice(0,300)};
+      if(it.pov) row.meta={...row.meta,pov:it.pov};
       await dbPut('messages',row);
       await renderChat();
       await new Promise(r=>setTimeout(r,paceDelay(p.content.length)));
