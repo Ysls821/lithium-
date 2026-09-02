@@ -4670,7 +4670,14 @@ function editPersona(id){
       </div>
     </div>
     <div class="group"><div class="field"><label>名字　角色会这样称呼你</label>
-      <input id="u-name" value="${esc(p.name)}" placeholder="例如：小刘"></div></div>
+      <input id="u-name" value="${esc(p.name)}" placeholder="例如：小刘"></div>
+      <div class="cell static"><div class="lbl">性别　角色对你的人称以此为准</div>
+        <select class="pssel" id="u-gender">
+          <option value="" ${!p.gender?'selected':''}>不指定</option>
+          <option value="女" ${p.gender==='女'?'selected':''}>女</option>
+          <option value="男" ${p.gender==='男'?'selected':''}>男</option>
+          <option value="其他" ${p.gender==='其他'?'selected':''}>其他</option>
+        </select></div></div>
     <div class="grouptitle">人设</div>
     <div class="group"><div class="field">
       <textarea id="u-persona" placeholder="你在角色眼里是谁：身份、性格、你们的关系…">${esc(p.persona||'')}</textarea></div></div>
@@ -4688,6 +4695,7 @@ async function savePersona(){
   const old=editingUserId?personas.find(x=>x.id===editingUserId):null;
   const p={id:editingUserId||uid(), name, avatar:draftAvatar,
     persona:document.getElementById('u-persona').value,
+    gender:document.getElementById('u-gender').value||'',
     createdAt:old?old.createdAt:Date.now()};
   await dbPut('personas',p);
   personas=await dbAll('personas');
@@ -10763,7 +10771,7 @@ ${char.bio||'（未填写）'}${ps.char}
 
 ## **重要：忽略技术异常**
 如果你在用户消息中看到任何乱码、随机字符串或无意义的字符组合，请完全忽略它们，只回应有意义的正常文字部分。`;
-  p+=`\n- **对话者身份:** 用户的名字是"${me.name}"`;
+  p+=`\n- **对话者身份:** 用户的名字是"${me.name}"${me.gender?`，**${me.gender}性**`:''}`;
   if((me.persona||'').trim()) p+=`。TA 的身份设定：${me.persona.trim()}`;
   p+=`\n- 对方的性别、称呼、身份**只以上面「对话者身份」为准**。身份设定里没写明的，保持中性表达——**绝对不要自行假设对方的性别**，也不要用错人称和称呼`;
   p+=`\n- **任务:** 根据对话上下文，以你的角色身份进行自然回应。`;
@@ -11223,10 +11231,15 @@ ${regenNote}
   const payload=[{role:'system',content:sys},...toApiMessages(history)];
   /* EVE 同款：插入位置为「后」的世界书作为独立 system 消息，
      放在历史之后、这一轮用户消息之前 —— 离生成近，130 条历史冲不淡它 */
-  if(lastWbAfter){
-    let at=payload.length;
-    for(let i=payload.length-1;i>0;i--){ if(payload[i].role==='user') at=i; else break; }
-    payload.splice(at,0,{role:'system',content:lastWbAfter});
+  {
+    const _me=personaOf(char);
+    const _idRemind=_me.gender?`对话对象提醒：对方「${_me.name}」是${_me.gender}性——人称、称呼、性别相关的一切描写都不要搞错。`:'';
+    const _near=(lastWbAfter?lastWbAfter+(_idRemind?String.fromCharCode(10)+String.fromCharCode(10)+_idRemind:''):_idRemind);
+    if(_near){
+      let at=payload.length;
+      for(let i=payload.length-1;i>0;i--){ if(payload[i].role==='user') at=i; else break; }
+      payload.splice(at,0,{role:'system',content:_near});
+    }
   }
   // 预设里放在「对话最后」的条目 —— 酒馆的 jailbreak 位
   if(lastPresetJb) payload.push({role:'user',content:lastPresetJb});
