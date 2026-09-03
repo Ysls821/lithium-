@@ -7074,9 +7074,10 @@ async function askDiary(silent,dateStr){
     }
     const ms=(same.length?same:all).slice(-25);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const p=`你现在是"${c.name}"：\n${c.bio||'（无设定）'}\n
-${D===today()?'今天是':'那天是'} ${D}。下面是你和「${me.name}」${D===today()?'今天':'那天'}的对话：\n${convo}\n
+    const p=`${storyCtx(c,{msgs:ms,take:25,skip:['diary']})}\n
 请以第一人称写一篇今天的日记。要求：
+- **写今天剧情里真实发生的事**——对话里说了什么、行程里做了什么，都是素材；
+  不要写成和剧情无关的抒情
 - ${g.minLen}-${g.maxLen} 字，像真的写在本子上，不是汇报
 - 写你自己的感受和没说出口的心思，不要复述对话
 - 符合你的性格和说话习惯
@@ -7213,9 +7214,7 @@ async function askMood(silent){
   try{
     const ms=(await msgsOf(curCharId)).slice(-16);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-今天和「${me.name}」的对话：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:20,skip:['diary','social']})}
 
 用一个 emoji 和一句不超过 15 字的话，表达你今天的心情。
 只能从这些 emoji 里选一个：${MOODS.join(' ')}
@@ -8035,11 +8034,7 @@ async function refreshShop(silent){
   try{
     const ms=(await msgsOf(curCharId)).slice(-12);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}
-
-最近和「${me.name}」的对话：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:14})}
 
 生成**你购物软件里的样子**。要符合你的经济状况、生活状态和最近在惦记的东西。
 
@@ -8122,13 +8117,15 @@ async function refreshJournal(silent){
     const ms=(await msgsOf(curCharId)).slice(-12);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
     const mood=moodOf(curCharId,today(),'char');
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}${mood?`\n今天的心情：${mood.emoji} ${mood.note||''}`:''}
-
-和「${me.name}」最近的对话：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:16,skip:['journal']})}
 
 写你**今天一整天**的起居注——从起床到睡前，包括还没发生的。
+
+**必须和上面的剧情对得上**：
+- 已经发生的时段要能解释你们对话里提到过的事（说过在忙什么、去了哪、见了谁）
+- **还没到的时段是"接下来会发生什么"**，要顺着当前剧情往下走——
+  约好了晚上见面就写进去，吵完架就别写得像没事人一样
+- 剧情里悬着的事（等谁的消息、要做的决定、约好的时间）应该在时间轴上有落点
 
 只输出 JSON：
 {
@@ -8167,11 +8164,7 @@ async function refreshStatus(silent){
     const ms=(await msgsOf(curCharId)).slice(-14);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
     const mood=moodOf(curCharId,today(),'char');
-    const prompt=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}${mood?`\n- 你今天的心情：${mood.emoji} ${mood.note||''}`:''}
-
-最近和「${me.name}」的对话：
-${convo}
+    const prompt=`${storyCtx(c,{msgs:ms,take:12})}
 
 现在请描述**此刻你手机里的样子**。要符合你的身份、当前时间和刚才的对话，具体、生活化，不要抒情。
 
@@ -8459,13 +8452,11 @@ async function aiPostMoment(){
     const ms=(await msgsOf(curCharId)).slice(-16);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
     const mood=moodOf(curCharId,today(),'char');
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}${mood?`\n你今天的心情：${mood.emoji} ${mood.note||''}`:''}
-
-最近和「${me.name}」的对话：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:16,skip:['social']})}
 
 发一条朋友圈。真实、日常，10-60 字，可以是吐槽、随手一拍的感想、生活碎片。
+**素材从上面的行程和剧情里挑**——今天真做过的事、真发生的心情，
+别发一件今天没发生过的事。
 不要故作深沉，不要写成文案，不要 @ 任何人，不要直接提对方的名字。
 直接输出正文，不要任何格式标记。`;
     const txt=(await callAPI([{role:'user',content:p}])).trim();
@@ -8481,8 +8472,7 @@ async function aiCommentMoment(id){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   toast('TA 在看…');
   try{
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${c.relation?`你和「${me.name}」现在的关系：${c.relation.stage}`:''}
+    const p=`${storyCtx(c,{msgs:await msgsOf(c.id),take:10,skip:['social','diary']})}
 
 「${me.name}」发了一条朋友圈：
 ${m.text}
@@ -9253,10 +9243,7 @@ async function autoScene(){
   try{
     const ms=(await msgsOf(genCtx.charId)).slice(-12);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const p=`你是"${c.name}"：${c.bio||''}
-${S.timeAware?timeContext(null):''}
-最近的对话：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:14})}
 
 现在你要拍一张照片发给对方。先想清楚这张照片拍的是什么。
 
@@ -9806,6 +9793,69 @@ ${hist}
   finally{ btn.disabled=false; }
 }
 
+/* ================= 剧情上下文 =================
+   TA 手机里所有生成入口（起居注 / 日记 / 朋友圈 / X / 聊天列表 / 状态 / 购物 / 心情）
+   以前各拿各的：都只有 bio + 最近几条对话，谁也看不见剧情走到哪、今天做了什么。
+   于是起居注的计划和主线对不上，日记不接剧情，朋友圈跟起居注互相矛盾。
+   现在统一走这一份，几个入口说的就是同一条故事线。
+   skip 用来排掉「自己」，避免生成时照抄上一版。 */
+function storyCtx(c,opt){
+  opt=opt||{}; const me=personaOf(c), skip=new Set(opt.skip||[]), out=[];
+  out.push(`你是"${c.name}"：${c.bio||'（无设定）'}`);
+  if(S.timeAware) out.push(String(timeContext(null)).trim());
+  out.push(`对方是「${me.name}」${me.gender?'（'+me.gender+'性）':''}${(me.persona||'').trim()?'：'+String(me.persona).trim().slice(0,120):''}`);
+  if(c.relation) out.push(`你们的关系：${c.relation.stage}（亲密度 ${c.relation.score}/100）`);
+
+  // 剧情进展 —— 故事线摘要就是"已经发生了什么"，这是联动的骨架
+  if(!skip.has('story')){
+    const su=sumsOf(c.id).slice(0,3);
+    if(su.length) out.push(NLNL+'【剧情进展】你们一路走到现在（从近到远）：'+NL
+      +su.map((x,i)=>(i+1)+'. '+x.text).join(NL));
+  }
+  if(!skip.has('mem')){
+    const core=memsOf(c.id).filter(m=>m.type==='core')
+      .sort((a,b)=>b.importance-a.importance).slice(0,+opt.mem||6);
+    if(core.length) out.push(NLNL+'【你一直记得的事】'+NL+core.map((m,i)=>(i+1)+'. '+m.content).join(NL));
+  }
+  if(!skip.has('chat')&&(opt.msgs||[]).length){
+    const ms=opt.msgs.slice(-(+opt.take||14));
+    out.push(NLNL+'【最近的对话】'+NL
+      +ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join(NL));
+  }
+  const th=moodOf(c.id,today(),'char'), my=moodOf(c.id,today(),'user');
+  if(th) out.push(NL+'你今天的心情：'+th.emoji+' '+(th.note||''));
+  if(my) out.push('对方今天的心情：'+my.emoji+' '+(my.note||''));
+
+  // 今天的行程：分成"已经发生"和"接下来打算"，日记和朋友圈都靠它对齐时间线
+  if(!skip.has('journal')){
+    const items=journalItems(((c.phone||{}).journal)||{});
+    if(items.length){
+      const now=jNow();
+      const done=items.filter(x=>jMin(x.time)<=now), plan=items.filter(x=>jMin(x.time)>now);
+      let t=NLNL+'【你今天的行程】';
+      t+=NL+'已经发生：'+NL+(done.length
+        ?done.map(x=>x.time+' '+x.what+(x.note?'（'+x.note+'）':'')).join(NL):'（今天还没开始）');
+      if(plan.length) t+=NL+'接下来打算：'+NL+plan.map(x=>x.time+' '+x.what).join(NL);
+      out.push(t);
+    }
+  }
+  if(!skip.has('diary')){
+    const d=diariesOf(c.id).filter(x=>x.who==='char').slice(0,2);
+    if(d.length) out.push(NLNL+'【你最近的日记】只有你自己看过，别直接复述：'+NL
+      +d.map(x=>x.date+'：'+String(x.content).slice(0,150)).join(NL));
+  }
+  if(!skip.has('social')){
+    const mm=momentsOf(c.id).slice(0,3);
+    if(mm.length) out.push(NLNL+'【最近的朋友圈】'+NL
+      +mm.map(x=>(x.author==='user'?'对方发：':'你发：')+String(x.text).slice(0,50)).join(NL));
+    const lp=((c.li||{}).posts||[]).slice(0,3);
+    if(lp.length) out.push(NLNL+'【你 X 小号最近发的】'+NL
+      +lp.map(x=>'- '+String(x.text).slice(0,50)).join(NL));
+  }
+  return out.join(NL);
+}
+const NL=String.fromCharCode(10), NLNL=String.fromCharCode(10,10);
+
 /* ---------- 转发帖子进聊天：双边互通的关键 ----------
    聊天里插 xsh 气泡（msgBody 会translate给模型），同时记 xlog，
    这样 X 侧和聊天侧都知道这件事发生过 */
@@ -10116,13 +10166,10 @@ async function refreshPhChats(silent){
   try{
     const ms=(await msgsOf(curCharId)).slice(-12);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}
-
-你和「${me.name}」最近的对话（这个人**不要**出现在下面的列表里）：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:12})}
 
 现在生成**你手机聊天软件里的会话列表**——你和其他人的对话。
+「${me.name}」是上面那个对话对象，**不要**出现在这个列表里。
 要符合你的社交状况：朋友很少就少几个，家里关系差就让家人那条冷淡，
 工作/学业相关的、外卖快递验证码这种也可以有。
 
@@ -10163,8 +10210,7 @@ async function refreshPhChat(){
   const x=(c.phone.chats||[])[phChatIdx]; if(!x) return;
   toast('拉取中…');
   try{
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}
+    const p=`${storyCtx(c,{msgs:await msgsOf(c.id),take:10,skip:['social','diary']})}
 
 你手机里和「${x.who}」${x.tag?'（'+x.tag+'）':''}的对话，最后一条是「${x.last}」。
 
@@ -10430,11 +10476,7 @@ async function refreshLi(silent){
     const mood=moodOf(curCharId,today(),'char');
     const old=liData(c);
     const keep=(old.posts||[]).slice(0,4).map(p=>'- '+p.text).join('\n');
-    const p=`你是"${c.name}"：${c.bio||'（无设定）'}
-${S.timeAware?timeContext(null):''}${mood?`\n你今天的心情：${mood.emoji} ${mood.note||''}`:''}
-
-最近和「${me.name}」的对话：
-${convo}
+    const p=`${storyCtx(c,{msgs:ms,take:16,skip:['social']})}
 ${keep?`\n你之前发过的帖子（不要重复）：\n${keep}`:''}
 ${(c.phoneCfg||{}).liPrompt?`\n## 额外要求（优先满足）\n${(c.phoneCfg||{}).liPrompt}`:''}
 ${(c.phoneCfg||{}).autoChange!==false?`\n你偶尔会折腾自己的主页——改签名、把某条旧帖设成私密。
