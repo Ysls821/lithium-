@@ -3212,7 +3212,7 @@ const DEFAULT_STYLE=`["在呢", "刚洗完澡", "怎么啦？"]
 
 const DEFAULT_SETTINGS={
   id:'global', apiBase:'https://api.openai.com/v1', apiKey:'', model:'gpt-4o-mini',
-  temperature:0.8, historyCount:30, histTurns:12, maxMessages:8, minMessages:2,
+  temperature:0.8, historyCount:30, histTurns:12, maxMessages:8,
   userName:'我', userPersona:'', timeAware:true, banNarration:true,
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
@@ -5660,8 +5660,7 @@ function renderSettings(){
         <input id="s-histturns" type="number" min="2" max="60" value="${S.histTurns}"></div>
       <div class="field"><label>按条数时带几条（角色单独设成「按条」时用）</label>
         <input id="s-hist" type="number" min="4" max="400" value="${S.historyCount}"></div>
-      <div class="field"><label>单次最少回几条</label><input id="s-minm" type="number" min="1" max="10" value="${S.minMessages??2}"></div>
-      <div class="field"><label>单次回几条（目标，TA 会往这个数发）</label><input id="s-maxm" type="number" min="1" max="40" value="${S.maxMessages}"></div>
+      <div class="field"><label>单次最多回几条</label><input id="s-maxm" type="number" min="1" max="40" value="${S.maxMessages}"></div>
       <div class="cell static"><div class="lbl">回复节奏</div>
         <select class="pssel" id="s-pace">
           <option value="fast" ${S.replyPace==='fast'?'selected':''}>快</option>
@@ -5889,7 +5888,6 @@ async function saveSettings(){
     historyCount:parseInt(v('s-hist').value)||30,
     histTurns:Math.max(2,parseInt(v('s-histturns').value)||12),
     maxMessages:parseInt(v('s-maxm').value)||8,
-    minMessages:Math.max(1,parseInt(v('s-minm').value)||2),
     timeAware:v('s-time').checked, banNarration:v('s-ban').checked,
     visionEnabled:v('s-vision').checked, notifyOn:v('s-notify').checked,
     replyPace:v('s-pace').value||'normal',
@@ -11168,8 +11166,7 @@ ${char.bio||'（未填写）'}${ps.char}
   p+=`
 
 # **聊天方式**
-- **一轮发 ${S.maxMessages} 条上下**，像真人在手机上连珠炮那样——多两条少两条都行，**但不要只发三五条就停**
-- 只有「应一声」的场合可以少发（对方说「嗯」「晚安」这种），底线是 ${S.minMessages||2} 条；只要话里有情绪、有信息、有反问，就要把话说满
+- 你必须按照手机聊天或面对面对话的格式进行输出，一次最少输出两条或三条消息，最多输出${S.maxMessages}条消息
 - 每条消息都应该是可以通过文字直接表达的内容
 - 模拟真实的手机聊天，不要写成一段完整的书面回复
 - **延续自己的说话方式**：上面历史里「你」发过的消息就是你说话的样子——句子长短、语气词、标点、口癖都照着延续，不要突然换一种腔调`;
@@ -11260,8 +11257,7 @@ ${_style}`;
   p+=`
 
 # **最后重申**
-你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。
-**数组里要有 ${S.maxMessages} 个元素上下**（不少于 ${S.minMessages||2}）—— 除非只是应一声，否则别三五条就收。${
+你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。${
     _cfgPov.povEnabled?'\n每条消息后面跟上 `{"type":"pov","content":"..."}` 镜头对象，整轮至少一个。':''}`;
   // 历史越长，开头的格式规则越容易被冲淡 —— 在最末尾再压一遍
   if(history&&history.length>40) p+=`
@@ -11272,7 +11268,6 @@ ${_style}`;
 - 错误：\`["你说什么？我他妈忍你很久了。滚。"]\`
 - 正确：\`["你说什么？", "我他妈忍你很久了。", "滚。"]\`
 - 想连发五条就给五个元素，这才是手机聊天的样子
-- **这一轮要发到 ${S.maxMessages} 条上下**，别只回三五条；除非只是应一声，最少也要 ${S.minMessages||2} 条
 另外，历史里「你」怎么说话，现在就怎么说话——语气、句长、口癖保持连贯，别突然变成另一个人。`;
   p+=ps.end;
   return p;
