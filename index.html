@@ -3018,9 +3018,24 @@ ID 标记是从 EVE 的引用回复机制借来的（它历史里每条都带 `[
 
 顺手从她真实日记里挑了 4 篇转成范文 `姬照_日记示例.txt`（05-01 管吃饭 / 05-16 被温柔到崩 / 05-19 认了喜欢 / 08-05 被「暂停沟通」），HTML 记号已转成 ~~ 和 ==。
 
+### 2026-09-05（二）· 有时只回一句：条数只说了一次
+
+用户反馈角色时不时只回一条。查提示词：「一次输出 2 到 8 条」**全篇只出现一次**，位置很靠前，后面隔着一百多条历史和十几段功能说明；末尾的「最后重申」只重申了 JSON 数组格式，**一个字没提条数**。长上下文里这条自然最先被冲掉——和之前踩过的「格式规则被冲淡」是同一个病，只是这次漏的是条数不是格式。
+
+改三处 + 加一个设置：
+
+- 新增全局「单次最少回几条」（`S.minMessages`，默认 2），和原有的「最多回几条」并排
+- 聊天方式那段用这个下限，并写清例外：**只有「应一声」的场合可以只回一条**（对方说「嗯」「晚安」），只要有情绪、有信息、有反问就必须拆多条
+- **最后重申**里补上条数（离生成最近，最不容易被冲淡）
+- 历史 >40 条时的格式再确认里也补一句
+
+保留「应一声可以只回一条」这个出口——真人本来就会只回一个「嗯」，硬性禁止反而假。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **约束只写一遍，等于没写** → 条数要求在 prompt 前段说了一次就再没提，长历史一冲就失效。凡是「每一轮都必须成立」的约束，都要在最末尾（离生成最近处）再钉一遍——格式如此，条数、人称、性别同理。
 
 - **「像不像」的问题先找范文再调 prompt** → 日记风格不对，第一反应是改要求措辞，但 EVE 导出里躺着 36 篇她真写的日记。有真实产出时，几篇范文顶得上任何形容词。
 - **别禁掉角色本来就有的习惯** → 旧 prompt 写着「不要日期」，可她每篇日记第一行都是带情绪的日期天气，那是声音的一部分。禁令要对着真实样本核过再下。
@@ -3169,7 +3184,7 @@ const DEFAULT_STYLE=`["在呢", "刚洗完澡", "怎么啦？"]
 
 const DEFAULT_SETTINGS={
   id:'global', apiBase:'https://api.openai.com/v1', apiKey:'', model:'gpt-4o-mini',
-  temperature:0.8, historyCount:30, histTurns:12, maxMessages:8,
+  temperature:0.8, historyCount:30, histTurns:12, maxMessages:8, minMessages:2,
   userName:'我', userPersona:'', timeAware:true, banNarration:true,
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
@@ -5617,6 +5632,7 @@ function renderSettings(){
         <input id="s-histturns" type="number" min="2" max="60" value="${S.histTurns}"></div>
       <div class="field"><label>按条数时带几条（角色单独设成「按条」时用）</label>
         <input id="s-hist" type="number" min="4" max="400" value="${S.historyCount}"></div>
+      <div class="field"><label>单次最少回几条</label><input id="s-minm" type="number" min="1" max="10" value="${S.minMessages??2}"></div>
       <div class="field"><label>单次最多回几条</label><input id="s-maxm" type="number" min="1" max="20" value="${S.maxMessages}"></div>
       <div class="cell static"><div class="lbl">回复节奏</div>
         <select class="pssel" id="s-pace">
@@ -5845,6 +5861,7 @@ async function saveSettings(){
     historyCount:parseInt(v('s-hist').value)||30,
     histTurns:Math.max(2,parseInt(v('s-histturns').value)||12),
     maxMessages:parseInt(v('s-maxm').value)||8,
+    minMessages:Math.max(1,parseInt(v('s-minm').value)||2),
     timeAware:v('s-time').checked, banNarration:v('s-ban').checked,
     visionEnabled:v('s-vision').checked, notifyOn:v('s-notify').checked,
     replyPace:v('s-pace').value||'normal',
@@ -11123,7 +11140,8 @@ ${char.bio||'（未填写）'}${ps.char}
   p+=`
 
 # **聊天方式**
-- 一次输出 **2 到 ${S.maxMessages} 条**消息，像真人在手机上连发几条那样
+- 一次输出 **${S.minMessages||2} 到 ${S.maxMessages} 条**消息，像真人在手机上连发几条那样
+- **只有在"应一声"的场合才可以只回一条**（对方说「嗯」「晚安」这种）；只要话里有情绪、有信息、有反问，就必须拆成多条发
 - 每条消息都应该是可以通过文字直接表达的内容
 - 模拟真实的手机聊天，不要写成一段完整的书面回复
 - **延续自己的说话方式**：上面历史里「你」发过的消息就是你说话的样子——句子长短、语气词、标点、口癖都照着延续，不要突然换一种腔调`;
@@ -11214,7 +11232,8 @@ ${_style}`;
   p+=`
 
 # **最后重申**
-你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。${
+你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。
+**数组里通常要有 ${S.minMessages||2} 到 ${S.maxMessages} 个元素** —— 除非只是应一声，否则别只给一个。${
     _cfgPov.povEnabled?'\n每条消息后面跟上 `{"type":"pov","content":"..."}` 镜头对象，整轮至少一个。':''}`;
   // 历史越长，开头的格式规则越容易被冲淡 —— 在最末尾再压一遍
   if(history&&history.length>40) p+=`
@@ -11225,6 +11244,7 @@ ${_style}`;
 - 错误：\`["你说什么？我他妈忍你很久了。滚。"]\`
 - 正确：\`["你说什么？", "我他妈忍你很久了。", "滚。"]\`
 - 想连发五条就给五个元素，这才是手机聊天的样子
+- **别只回一条**：除非只是应一声，这一轮至少 ${S.minMessages||2} 个元素
 另外，历史里「你」怎么说话，现在就怎么说话——语气、句长、口癖保持连贯，别突然变成另一个人。`;
   p+=ps.end;
   return p;
