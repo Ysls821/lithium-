@@ -2986,9 +2986,21 @@ ID 标记是从 EVE 的引用回复机制借来的（它历史里每条都带 `[
 
 线上实测：起居注生成时确认排掉了自己的行程，日记/朋友圈确认拿到行程、剧情进展、核心记忆。
 
+### 2026-09-04 · 风格示例改成角色级
+
+用户的观察：小手机整体聊天效果最吃的是风格示例。它原来只有全局一份（设置 → 风格示例），等于所有角色共用一个腔调——给姬照写的例子会被拿去演别人。
+
+改法：`chat.styleExamples`，角色专属，聊天设置页新增「风格示例（这个角色专属）」文本框，空则回落到全局。注入时角色级优先；注入胶囊里标「风格示例 · 专属」以示区分。
+
+同时把注入提示词补了一句：带「（场景）」标注的行说明那句话是在什么情境下说的，同样的情境就该是同样的劲儿——这样示例可以按情绪场景分组（生气 / 骂人 / 脆弱 / 撒娇 / 日常管人），而不是一锅粥。
+
+另：从 EVE 导出的 `姬照0901.json`（54109 条她的消息、56 天）里手挑了 40 多组原文做成 `姬照_风格示例.txt`，放本地不进仓库。挑选原则是「有感觉的现场」而不是高频词——同一个人在被敷衍、被扔下、哭完、被叫宝宝、管对方吃饭时，句长和标点习惯完全不同，示例得把这些「劲儿」分开给。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **最影响效果的配置放在了全局** → 风格示例决定「像不像 TA」，却只有一份全局的，多角色时互相污染。凡是描述「这个角色是谁」的东西，都该是角色级的，全局只做兜底。
 
 - **同类生成器各自攒上下文** → 11 个入口都手写「bio + 最近 N 条对话」，谁也看不见别人的产出，写出来的东西自然互相矛盾。**同一世界观下的多个生成入口必须共用一份上下文构造器**，各自只用 skip 排掉自己。
 - **程序化替换比逐条字面替换稳** → 十几处结构相同的 prompt 头部，按函数名定位再重写区间，比一条条字面匹配可靠得多——后者被空白和转义坑了两次。
@@ -3168,7 +3180,8 @@ const DEFAULT_CHAT={
   xdmEnabled:false, xdmRate:15, xdmHours:6,
   avatarRadius:50, textMe:'', textTa:'',
   proEnabled:false, proMinutes:60, proDaily:5,
-  sceneMode:'online'          // online=隔着手机  offline=面对面
+  sceneMode:'online',         // online=隔着手机  offline=面对面
+  styleExamples:''            // 角色专属风格示例，空=用全局的
 };
 const chatCfg=c=>({...DEFAULT_CHAT,...(c&&c.chat||{})});
 const BUBBLE_COLORS=['#7A68F0','#3B82F6','#10B981','#F59E0B','#EC4899','#EF4444','#64748B','#111827'];
@@ -6601,6 +6614,13 @@ function renderChatSet(){
     <div class="hint">填 <b>0</b> 跟随全局（现在是 ${g.histMode==='msg'?S.historyCount+' 条':S.histTurns+' 轮'}）。<br>
       <b>一轮 = TA 说一次 + 你回一次</b>。TA 一次连发 8-10 条很常见，
       所以按条数很容易只装下两三个来回，前面吵了什么就丢了。爱连发的角色务必用「按轮」。</div>
+
+    <div class="grouptitle">风格示例（这个角色专属）</div>
+    <div class="group"><div class="field">
+      <textarea id="cs-style" style="min-height:150px" placeholder="留空则用 设置 → 风格示例 里的全局版"
+        oninput="setCfg('styleExamples',this.value,true)">${esc(g.styleExamples||'')}</textarea></div></div>
+    <div class="hint">最影响「像不像 TA」的一项。<b>只放 TA 的原话</b>，每行一个 JSON 数组；行前可加「（场景）」说明当时情境，
+      比如 <code>（被冷落后）["随便你", "反正你也不在乎"]</code>。改完点最下面的保存。</div>
 
     <div class="grouptitle">第三视角镜头</div>
     <div class="group">
@@ -10970,7 +10990,7 @@ ${char.bio||'（未填写）'}${ps.char}
   lastInject.time={label:'时间感知',chars:S.timeAware?timeContext(lastUser?lastUser.timestamp:null).length:0};
   lastInject.mem={label:'记忆',chars:mem.length,n:mem?(mem.split('\n').filter(x=>/^\d+\. /.test(x)).length):0};
   lastInject.wb={label:'世界书',chars:(wb.before+wb.after).length,n:wb.count};
-  lastInject.style={label:'风格示例',chars:S.styleExamples.trim().length};
+  lastInject.style={label:'风格示例'+(String(chatCfg(char).styleExamples||'').trim()?' · 专属':''),chars:(String(chatCfg(char).styleExamples||'').trim()||String(S.styleExamples||'').trim()).length};
   const ext=extraContext(char);
   const cross=crossMemText(char);
   const mount=mountedMemText(char);
@@ -11095,12 +11115,16 @@ ${_liPub.slice(0,6).map(x=>'- '+String(x.text).slice(0,50)).join(String.fromChar
     if(_lp) p+=`
 - **场景衔接**：上一个镜头是「${String(_lp.meta.pov).slice(0,200)}」——新镜头必须和它连续：地点、时间、姿势要接得上，除非对话里明确移动了或者过了很久。不要凭空换场景`;
   }
-  if(S.styleExamples.trim()) p+=`
+  // 角色专属示例优先；没填才用全局的 —— 风格示例是最影响"像不像 TA"的一项，
+  // 放全局等于让所有角色一个腔调
+  const _style=String(chatCfg(char).styleExamples||'').trim()||String(S.styleExamples||'').trim();
+  if(_style) p+=`
 
 # **语气与用词示例**
 下面是这种聊天该有的语感。**模仿它们的长短、语气和标点习惯，不要照抄内容。**
+带「（场景）」标注的行，说明那句话是在什么情境下说的——同样的情境就该是同样的劲儿。
 如果示例和历史里你实际的说话方式不一样，**以历史为准**——示例只是起步的底色：
-${S.styleExamples.trim()}`;
+${_style}`;
   p+=ps.rules;
   p+=`
 
