@@ -2996,6 +2996,10 @@ ID 标记是从 EVE 的引用回复机制借来的（它历史里每条都带 `[
 
 另：从 EVE 导出的 `姬照0901.json`（54109 条她的消息、56 天）里手挑了 40 多组原文做成 `姬照_风格示例.txt`，放本地不进仓库。挑选原则是「有感觉的现场」而不是高频词——同一个人在被敷衍、被扔下、哭完、被叫宝宝、管对方吃饭时，句长和标点习惯完全不同，示例得把这些「劲儿」分开给。
 
+### 2026-09-04（二）· 风格示例支持从 txt 导入
+
+聊天设置的「风格示例（这个角色专属）」下加了「从 txt 文件导入」——选文件整个覆盖文本框，仍要点保存才落库。填了内容时旁边多一个「清空，改用全局」。为配合几千字的示例文件，手贴太容易漏行。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -6619,8 +6623,12 @@ function renderChatSet(){
     <div class="group"><div class="field">
       <textarea id="cs-style" style="min-height:150px" placeholder="留空则用 设置 → 风格示例 里的全局版"
         oninput="setCfg('styleExamples',this.value,true)">${esc(g.styleExamples||'')}</textarea></div></div>
+    <div style="padding:6px 16px 0;display:flex;gap:8px">
+      <button class="mini" onclick="importStyleTxt()">从 txt 文件导入</button>
+      ${(g.styleExamples||'').trim()?`<button class="mini" onclick="setCfg('styleExamples','')">清空，改用全局</button>`:''}
+    </div>
     <div class="hint">最影响「像不像 TA」的一项。<b>只放 TA 的原话</b>，每行一个 JSON 数组；行前可加「（场景）」说明当时情境，
-      比如 <code>（被冷落后）["随便你", "反正你也不在乎"]</code>。改完点最下面的保存。</div>
+      比如 <code>（被冷落后）["随便你", "反正你也不在乎"]</code>。导入会整个覆盖，改完都要点最下面的保存。</div>
 
     <div class="grouptitle">第三视角镜头</div>
     <div class="group">
@@ -9899,6 +9907,28 @@ function storyCtx(c,opt){
   return out.join(NL);
 }
 const NL=String.fromCharCode(10), NLNL=String.fromCharCode(10,10);
+
+/* 风格示例从 txt 导入 —— 覆盖文本框和草稿，仍要点保存才落库。
+   BOM 和换行都用 charCode 处理，这里不写正则 */
+function importStyleTxt(){
+  const i=document.createElement('input');
+  i.type='file'; i.accept='.txt,text/plain';
+  i.onchange=async()=>{
+    const f=i.files[0]; if(!f) return;
+    try{
+      let t=await f.text();
+      if(t.charCodeAt(0)===0xFEFF) t=t.slice(1);
+      t=t.trim();
+      if(!t) throw new Error('文件是空的');
+      const ta=document.getElementById('cs-style');
+      if(ta) ta.value=t;
+      setCfg('styleExamples',t,true);
+      const lines=t.split(String.fromCharCode(10)).filter(x=>x.trim()).length;
+      toast('导入了 '+lines+' 行，记得点最下面的保存');
+    }catch(e){ toast('导入失败：'+e.message); }
+  };
+  i.click();
+}
 
 /* ---------- 转发帖子进聊天：双边互通的关键 ----------
    聊天里插 xsh 气泡（msgBody 会translate给模型），同时记 xlog，
