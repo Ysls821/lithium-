@@ -540,6 +540,10 @@ body{background:#0A0A0C;color:var(--text);
 .bubble.xsh .xi{width:100%;border-radius:8px;margin:2px 0 5px;max-height:130px;object-fit:cover;display:block}
 .bubble.xsh .xt{font-size:13.5px;line-height:1.55;opacity:.92;border-left:2.5px solid currentColor;padding-left:8px}
 .bubble.xsh .cap{margin-top:7px}
+/* 日记里的划掉 / 高亮 */
+.dc{white-space:pre-wrap}
+.dc s{opacity:.5;text-decoration:line-through}
+.dc mark{background:none;color:var(--accent);font-weight:600;padding:0}
 .bubble.img{position:relative}
 .bubble.img img{display:block;max-width:180px;max-height:240px;border-radius:15px;object-fit:cover;cursor:pointer}
 .bubble.img .cap{padding:6px 9px 3px;font-size:13.5px;opacity:.85}
@@ -3000,9 +3004,26 @@ ID 标记是从 EVE 的引用回复机制借来的（它历史里每条都带 `[
 
 聊天设置的「风格示例（这个角色专属）」下加了「从 txt 文件导入」——选文件整个覆盖文本框，仍要点保存才落库。填了内容时旁边多一个「清空，改用全局」。为配合几千字的示例文件，手贴太容易漏行。
 
+### 2026-09-05 · 日记对齐 EVE：范文 + 划掉/高亮 + 自写日期天气
+
+用户觉得日记「风格跟小照差很多」。查了两头：
+
+**EVE 的日记 prompt**（解出来的 0x10ac / 0x106b / 0x2441）：你是X，人设如下 → 现在是{日期}，你需要写一篇私人日记 → 直接输出、**开头自己写日期和天气** → 最近的聊天内容 → 要求（用你的口吻 / 记录想法感受经历 / 可提及对用户的真实感情 / 100-400 字）→ **特殊样式**：后悔的话用 strike 划掉、语气激动的用 mark 高亮，每种最多 1-2 次。
+
+**她在 EVE 里真写过的 36 篇日记**（`characterDiaries`，04-24 → 08-23，平均 518 字）——这才是风格的来源。几乎每篇都有 diary-strikethrough / diary-highlight，而且用法非常一致：==高亮== 放最狠的一句（「谁是她宝贝。」「我尝到了糖，就再也受不了没有糖的日子了。」），~~划掉~~ 放心里认了、嘴上不肯的（「其实我只是想让她再抱紧一点。」「我好像有点喜欢她了。」）。开头一行「2026年5月1日 星期五，天气：大概晴吧。没出门。」——天气带情绪。
+
+小手机以前：不许写日期、没有记号、也没有范文，只靠「符合你的性格」四个字。当然不像。
+
+改了四处：① `diary.style` 角色级日记范文，日记设置页新增文本框 + txt 导入，注入时「模仿语气、句长、断行、划掉和高亮的用法」；② prompt 要求第一行自写日期天气，允许引用对方原话但写自己的反应；③ 两种记号 `~~划掉~~` `==高亮==`，每种最多两次；④ 渲染 `diaryHTML()` 转义后放行成 `<s>` / `<mark>`。
+
+顺手从她真实日记里挑了 4 篇转成范文 `姬照_日记示例.txt`（05-01 管吃饭 / 05-16 被温柔到崩 / 05-19 认了喜欢 / 08-05 被「暂停沟通」），HTML 记号已转成 ~~ 和 ==。
+
 ---
 
 ## 修过的坑（本次新增）
+
+- **「像不像」的问题先找范文再调 prompt** → 日记风格不对，第一反应是改要求措辞，但 EVE 导出里躺着 36 篇她真写的日记。有真实产出时，几篇范文顶得上任何形容词。
+- **别禁掉角色本来就有的习惯** → 旧 prompt 写着「不要日期」，可她每篇日记第一行都是带情绪的日期天气，那是声音的一部分。禁令要对着真实样本核过再下。
 
 - **最影响效果的配置放在了全局** → 风格示例决定「像不像 TA」，却只有一份全局的，多角色时互相污染。凡是描述「这个角色是谁」的东西，都该是角色级的，全局只做兜底。
 
@@ -7018,6 +7039,10 @@ async function sendSticker(id){
 const diariesOf=cid=>diaries.filter(d=>d.characterId===cid)
   .sort((a,b)=>(b.date+b.who).localeCompare(a.date+a.who));
 function openDiary(){ goTo('s-diary',renderDiary); }
+/* 日记正文：先转义，再放行两种记号 —— ~~划掉~~ / ==高亮==（照 EVE 的 strike / mark） */
+function diaryHTML(t){
+  return esc(t).replace(/~~([^~]+?)~~/g,'<s>$1</s>').replace(/==([^=]+?)==/g,'<mark>$1</mark>');
+}
 function renderDiary(){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   const list=diariesOf(curCharId);
@@ -7031,7 +7056,7 @@ function renderDiary(){
         <div class="dh"><span class="who" style="background:${d.who==='user'?'var(--accent)':'#FF9500'}">${
           d.who==='user'?esc(me.name):esc(c.name)}</span>
           <span class="dt">${esc(d.date)}</span></div>
-        <div class="dc">${esc(d.content)}</div></div>`).join('')
+        <div class="dc">${diaryHTML(d.content)}</div></div>`).join('')
       :emptyState(ICO_MEM,'还没有日记','右上角写今天的<br>或者让 TA 写一篇'))
     +`<div style="height:20px"></div>`;
 }
@@ -7058,13 +7083,21 @@ function diaryMenu(id){
       await dbDel('diaries',d.id); diaries=await dbAll('diaries'); renderDiary(); }}
   ]);
 }
-const DEFAULT_DIARY={extra:'',minLen:100,maxLen:250,auto:false,hour:23};
+const DEFAULT_DIARY={extra:'',minLen:100,maxLen:250,auto:false,hour:23,style:''};
 const diaryCfg=c=>({...DEFAULT_DIARY,...(c&&c.diary||{})});
 
 function openDiaryCfg(){ goTo('s-diarySet',renderDiaryCfg); }
 function renderDiaryCfg(){
   const g=diaryCfg(characters.find(x=>x.id===curCharId));
   document.getElementById('diarySetBody').innerHTML=`
+    <div class="grouptitle">日记风格示例（TA 以前写的日记原文）</div>
+    <div class="group"><div class="field">
+      <textarea id="dc-style" style="min-height:150px"
+        placeholder="贴 2-4 篇 TA 的日记原文。划掉用 ~~文字~~，高亮用 ==文字==">${esc(g.style||'')}</textarea>
+    </div></div>
+    <div style="padding:6px 16px 0"><button class="mini" onclick="importDiaryStyleTxt()">从 txt 文件导入</button></div>
+    <div class="hint">比「额外要求」管用得多——模型学的是范文的语域，不是描述。留空则只按下面的要求写。改完点保存。</div>
+
     <div class="grouptitle">额外要求</div>
     <div class="group"><div class="field">
       <textarea id="dc-extra" style="min-height:96px"
@@ -7100,7 +7133,7 @@ async function saveDiaryCfg(){
   const v=id=>document.getElementById(id);
   const c=characters.find(x=>x.id===curCharId);
   const mn=parseInt(v('dc-min').value)||100, mx=parseInt(v('dc-max').value)||250;
-  c.diary={extra:v('dc-extra').value.trim(),
+  c.diary={extra:v('dc-extra').value.trim(), style:((document.getElementById('dc-style')||{}).value||'').trim(),
     minLen:Math.min(mn,mx), maxLen:Math.max(mn,mx),
     auto:v('dc-auto').checked, hour:Math.max(0,Math.min(23,parseInt(v('dc-hour').value)||23))};
   await dbPut('characters',c); characters=await dbAll('characters');
@@ -7126,14 +7159,19 @@ async function askDiary(silent,dateStr){
     }
     const ms=(same.length?same:all).slice(-25);
     const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
+    const dstyle=String(g.style||'').trim();
     const p=`${storyCtx(c,{msgs:ms,take:25,skip:['diary']})}\n
-请以第一人称写一篇今天的日记。要求：
-- **写今天剧情里真实发生的事**——对话里说了什么、行程里做了什么，都是素材；
-  不要写成和剧情无关的抒情
+${dstyle?`下面是你以前写过的日记。**模仿它的语气、句长、断行习惯，以及划掉和高亮的用法**，不要照抄内容：
+${dstyle}
+
+`:''}请以第一人称写一篇今天的日记。要求：
+- **第一行自己写日期和天气**，像「2026年5月1日 星期五，天气：大概晴吧。没出门。」——天气可以带情绪，不用准确
+- **写今天剧情里真实发生的事**——对话里说了什么、行程里做了什么，都是素材；可以引用对方说过的原话，但写的是你对它的反应，不是复述对话
 - ${g.minLen}-${g.maxLen} 字，像真的写在本子上，不是汇报
-- 写你自己的感受和没说出口的心思，不要复述对话
+- 写你自己的感受和没说出口的心思；嘴上不认、心里认了的，都可以写
+- 两种记号，可选，每种一篇里最多用两次：写了又后悔、不想承认的话用 ~~划掉~~；语气最重的一句用 ==高亮==
 - 符合你的性格和说话习惯
-- 直接输出正文，不要标题、不要日期、不要任何格式标记${g.extra?'\n\n## 额外要求（优先满足）\n'+g.extra:''}`;
+- 直接输出正文，不要标题、不要任何其他格式标记${g.extra?'\n\n## 额外要求（优先满足）\n'+g.extra:''}`;
     const txt=(await callAPI([{role:'user',content:p}])).trim();
     const ex=diaries.find(d=>d.characterId===curCharId&&d.date===D&&d.who==='char');
     await dbPut('diaries',{id:ex?ex.id:uid(),characterId:curCharId,date:D,who:'char',
@@ -9907,6 +9945,23 @@ function storyCtx(c,opt){
   return out.join(NL);
 }
 const NL=String.fromCharCode(10), NLNL=String.fromCharCode(10,10);
+
+/* 日记范文从 txt 导入 —— 只填进文本框，点保存才落库 */
+function importDiaryStyleTxt(){
+  const i=document.createElement('input');
+  i.type='file'; i.accept='.txt,text/plain';
+  i.onchange=async()=>{
+    const f=i.files[0]; if(!f) return;
+    try{
+      let t=await f.text();
+      if(t.charCodeAt(0)===0xFEFF) t=t.slice(1);
+      t=t.trim(); if(!t) throw new Error('文件是空的');
+      const ta=document.getElementById('dc-style'); if(ta) ta.value=t;
+      toast('导入了 '+t.length+' 字，记得点保存');
+    }catch(e){ toast('导入失败：'+e.message); }
+  };
+  i.click();
+}
 
 /* 风格示例从 txt 导入 —— 覆盖文本框和草稿，仍要点保存才落库。
    BOM 和换行都用 charCode 处理，这里不写正则 */
