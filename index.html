@@ -3272,6 +3272,7 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - **装配**不变：`generateImage(tags, char)` → `buildImgPrompt` 按「提示词顺序」拼画师串 / 角色固定词 / 画面 / 质量词，`buildVibeParams` 带上全局 vibe
 - **相册** `characters.photos`：聊天里生成的照片、朋友圈配图都存进去（上限 120），TA 的手机 → 相册 现在列出全部：发给你的照片、朋友圈配图、lithium 配图、编辑角色里加的图，点开看大图；手机壁纸选择器也能挑到
 - 兜底解析同步认 desc；模型直接给 tags 的仍然可用，含中文的 tags 会再转一次
+- 用户反馈 15-25 个 tag 太少：**数量不限**，按「背景 / 光线 → 动作 / 表情 / 构图 → 穿着」的顺序把描述里每个细节都落成 tag，明确不写外貌（固定词里有）；上限从 400 字放到 2000。「让 TA 想一个画面」同步放开
 
 ---
 
@@ -10404,7 +10405,7 @@ async function autoScene(){
 现在你要拍一张照片发给对方。先想清楚这张照片拍的是什么。
 
 只输出 JSON：
-{"caption":"中文，一句话说明这是什么照片，20字内","tags":"英文 danbooru 风格 tag，逗号分隔，描述画面内容、构图、光线，不要画师名不要质量词，15个以内"}`;
+{"caption":"中文，一句话说明这是什么照片，20字内","tags":"英文 danbooru 风格 tag，逗号分隔，按 背景/光线 → 动作/表情/构图 → 穿着 的顺序写，数量不限，画面复杂就多写；不要写外貌（另有固定词），不要画师名不要质量词"}`;
     let t=(await callAPI([{role:'user',content:p}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
@@ -12506,14 +12507,18 @@ async function descToTags(desc,c){
 
 描述：${desc}
 ${fixed?`
-角色外貌的固定 tag 已经另外拼上了：${fixed}
-不要重复这些外貌 tag，只写描述里的动作、表情、姿势、服饰、场景、构图、光线、氛围。`:''}
-要求：15-25 个 tag，逗号分隔，不要画师名，不要质量词，不要句子，不要解释。只输出 tag。`;
+角色的外貌固定 tag 已经另外拼上了（${fixed}），**不要写外貌**：发型发色瞳色身材这些一个都不要。`:''}
+按这个顺序写：
+1. 背景 / 场景 / 光线 / 氛围（在哪、几点、什么天气、什么光）
+2. 角色在做什么：姿势、动作、表情、视线、手在干什么、镜头构图（自拍 / 镜子 / 俯拍 / 特写…）
+3. 穿着：每件衣服、颜色、材质、配饰、状态（湿的、皱的、半脱的…）
+数量不限——画面复杂就多写，把描述里每个细节都落成 tag，别为了凑短而漏东西。
+逗号分隔，不要画师名，不要质量词，不要句子，不要解释。只输出 tag。`;
   let t=(await callAPI([{role:'user',content:q}])).trim();
   t=t.replace(/^```[a-z]*\s*/i,'').replace(/```\s*$/,'').replace(/^tags?\s*[:：]\s*/i,'')
      .replace(/[\r\n]+/g,', ').replace(/\s*,\s*/g,', ').replace(/(,\s*)+/g,', ').replace(/^,\s*|,\s*$/g,'').trim();
   if(!t) throw new Error('没转出 tag');
-  return t.slice(0,400);
+  return t.slice(0,2000);
 }
 /* 生成出来的照片存进角色自己的相册（TA 的手机 → 相册） */
 async function addCharPhoto(cid,src,caption,from){
