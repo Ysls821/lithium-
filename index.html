@@ -179,6 +179,9 @@ body{background:#0A0A0C;color:var(--text);
 /* 背景挂在整屏上（高度恒定），不要挂 .body —— .body 高度一变 cover 就会重新居中，背景跳版 */
 #s-chat{background:var(--chat-bg);background-size:cover;background-position:center}
 #s-chat .body{background:transparent}
+/* 有背景图但没开沉浸：顶栏 / 输入栏用实底，和状态栏一个颜色，图只铺在消息区 */
+#s-chat.hasbg .navbar,#s-chat.hasbg #chatInputBar,#s-chat.hasbg #quoteBar,#s-chat.hasbg #selectBar{
+  background:var(--bg)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 
 /* ── 沉浸模式：背景通栏，上下栏浮在图上 ──
    前景色不写死，按背景图亮度自动在 深色前景 / 浅色前景 之间切换 */
@@ -3466,10 +3469,17 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 用户要在聊天设置里调头像大小。`chat.avatarSize`（24–56px，默认 34），`applyChatSkin` 写成 `#s-chat` 的 `--av-s`，`.msg .av` 宽高改用它；头像框按百分比算，跟着一起缩。放在「头像形状」下面，每个角色独立。
 
+### 2026-09-05（二十九）· 非沉浸模式的聊天顶栏
+
+用户：聊天页非沉浸模式时顶栏长得很奇怪。在线上复现：角色设了聊天背景图但没开沉浸时，背景图铺在整个 `#s-chat` 上，顶栏和输入栏是 76% 透明的毛玻璃，压在图上变成一条脏色带，而上面的状态栏在屏幕之外、还是实色——两条颜色不一样的横条叠着。
+
+改法：这种状态给 `#s-chat` 加 `hasbg`，顶栏、输入栏、引用栏、多选栏改实底 `var(--bg)`、去掉毛玻璃，和状态栏一个颜色，图只铺在消息区。沉浸模式不受影响。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **半透明栏只在「底下是纯色」时好看** → 毛玻璃栏叠在任意图片上，颜色就不受控。有图的场景要么整体沉浸（栏也透明），要么栏改实底，不能停在中间。
 - **「全局一个滑块」和「每个素材自己调」的取舍** → 素材来源不一的东西（框、vibe）一律按个体存参数，全局值只做默认。上一版全局滑块看着省事，用户第一天就要求拆开。
 - **列表项点击 = 立刻生效，是危险的默认** → 字体列表点一下就切换，用户想看详情却被切了字体。列表点击进详情，快捷动作放右侧小按钮。
 - **PWA 缺图标等于没做** → 没有 192 / 512 图标，Android 不给安装提示，iOS 用截图当图标。manifest 里的图标必须是真文件路径，data URL 的 manifest 放不了。
@@ -3823,6 +3833,8 @@ function refreshImm(id){
   document.getElementById('phone').classList.toggle('noscrim',!!(cfg&&cfg.noScrim));
   if(ok) applyTone(bg); else document.getElementById('phone').classList.remove('lightbg');
   document.getElementById('s-chat').style.backgroundImage=(bg&&!hasImm)?`url("${bg}")`:'';
+  // 非沉浸但有背景图：顶栏和输入栏改成实底，别让半透明毛玻璃压在图上变成一条脏色带
+  document.getElementById('s-chat').classList.toggle('hasbg',!!(bg&&!hasImm));
   if(typeof wxSync==='function') wxSync();
 }
 function tab(id){
