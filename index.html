@@ -1022,7 +1022,7 @@ input[type=range]{accent-color:var(--accent)}
 .vibecard.sel{outline:2px solid var(--accent);outline-offset:2px}
 /* 头像框：叠在头像上；容器放开裁切，头像图自己按容器圆角裁 */
 .avframe{position:absolute!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;
-  width:var(--frame-scale,135%)!important;height:var(--frame-scale,135%)!important;
+  width:calc(var(--frame-scale,108%) * var(--fit,1.35))!important;height:calc(var(--frame-scale,108%) * var(--fit,1.35))!important;
   transform:translate(-50%,-50%)!important;max-width:none!important;max-height:none!important;
   pointer-events:none;z-index:3;object-fit:contain!important;border-radius:0!important}
 *:has(> .avframe){position:relative;overflow:visible!important}
@@ -3274,10 +3274,33 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - 兜底解析同步认 desc；模型直接给 tags 的仍然可用，含中文的 tags 会再转一次
 - 用户反馈 15-25 个 tag 太少：**数量不限**，按「背景 / 光线 → 动作 / 表情 / 构图 → 穿着」的顺序把描述里每个细节都落成 tag，明确不写外貌（固定词里有）；上限从 400 字放到 2000。「让 TA 想一个画面」同步放开
 
+### 2026-09-05（十八）· vibe 组 / 头像框自动适配内圈
+
+用户两条：vibe 要有「组」，库放全部但生图只看当前组；头像框套上去比头像还小，要永远适配。
+
+**vibe 组**
+
+- 数据：`S.img.vibes` 变成纯仓库；新加 `S.img.vibeGroups = [{id, name, items:[{vid, strength, info, on}]}]` 和 `S.img.activeGroup`。组里每张有自己的强度 / 信息提取 / 开关，和库里的默认值分开
+- `buildVibeParams` 只看 `activeGroup` 那个组里开着的项，库里的 `on` 不再参与；没有选中组就不带 vibe
+- 老数据没有组的，`vibeGroupsOf` 临时凑：按 `v.group` 名各成一组，散的且开着的凑成「当前」组并设为选中，行为和以前一致；进设置页时 `migrateVibeGroups` 落成正式数据
+- 设置页 Vibe 区分两个标签：「组　生图用这里」（组 chip 一排，选中即生效；组内卡片 + 从库里加 + 改名 / 删组；点卡片调这一组里的强度、信息提取、开关、移出组）和「全部」（仓库：上传、默认值、改名、删除、一键加进当前组）
+- 导入：bundle / vibe 组文件按组名自动成组（同名并进去），单个文件和图片进库并加进当前组（没有组就建「当前」）
+- 长按菜单同步：改名 / 加进（移出）当前组 / 看图 / 从库里删除；库里删掉会从各组移除
+
+**头像框自动适配**
+
+- 问题根源：框图四周留白大，环本身只占画面一部分，按固定 135% 放，内圈比头像还小
+- `frameFit`：去底后裁掉透明边、补成正方形，再从圆心往 72 个方向走到第一个不透明像素，取最短距离当内圈半径，`fit = 边长 / 内圈直径`，存在框记录上
+- 显示：`.avframe` 宽高 = `--frame-scale × --fit`，`--fit` 按框内联；**100% = 内圈正好等于头像**，默认 108% 让环压住头像边缘一点，滑块 80–150。老默认 135 当没设过
+- 老框没有 fit 的启动时补一次（`warmFrames`）
+- 中心落在图案上（开口框、文字框）时用最近元素的距离，效果一样
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「参考哪些」和「有哪些」要分开存** → vibe 的 on/off 挂在库项上，等于全局只有一套开关，换场景就得一个个点。参考集合应该是独立对象（组），库只管存。
+- **固定倍率套不住任意素材** → 装饰性叠图（框、挂件）来源五花八门，留白比例没有标准。要测量素材本身的有效区域（内圈半径）再算倍率，把「适配」做成数据而不是常数。
 - **让聊天模型顺手写生图 tag 是在给它加戏** → 聊天回合里模型正忙着扮演角色，让它同时输出一段英文 tag，格式和质量都容易崩。拆成两步：回合里只写它擅长的中文描述，tag 转换单独一次调用，还能把角色固定词喂进去去重。
 - **生成物要有落点** → 图生成完只挂在消息上，用户翻不到。任何自动生成的图片都要有一个能回看的地方（相册），存的时候带来源和说明。
 - **新增结构化输出，第一天就要配兜底** → 贴表情、pov 都是这么栽过来的：提示词写得再清楚，模型也会用单引号、等号、漏 type。每加一种对象类型，`sanitizeParts` 里就要同步加一条「长得像它的文字」的识别，不然坏格式直接变成用户看到的台词。
@@ -3625,15 +3648,17 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const avatarInner=a=>!a?IC('person',22):(/^(https?:|data:)/.test(a)?`<img src="${esc(a)}" alt="">`:esc(a));
 /* 头像框：按头像图反查是谁的（角色 / 身份），有框就叠一张。没有头像图的用不了框 */
 function frameSrcFor(a){
-  if(!a||S.frameOn===false||!frames.length||!/^(https?:|data:)/.test(a)) return '';
+  if(!a||S.frameOn===false||!frames.length||!/^(https?:|data:)/.test(a)) return null;
   const owner=characters.find(c=>c.frame&&c.avatar===a)||personas.find(p=>p.frame&&p.avatar===a);
-  if(!owner) return '';
-  const f=frames.find(x=>x.id===owner.frame); return f?f.src:'';
+  if(!owner) return null;
+  return frames.find(x=>x.id===owner.frame)||null;
 }
-const frameImg=src=>src?`<img class="avframe" src="${esc(src)}" alt="">`:'';
+/* f 可以是框记录 {src,fit} 或直接一个 src；fit 是「边长 / 内圈直径」，没有就按 1.35 */
+const frameImg=f=>{ if(!f) return ''; const src=typeof f==='string'?f:f.src, fit=(typeof f==='object'&&f.fit)||1.35;
+  return src?`<img class="avframe" style="--fit:${fit}" src="${esc(src)}" alt="">`:''; };
 const avatarHTML=a=>avatarInner(a)+frameImg(frameSrcFor(a));
 /* 编辑页预览用：框还没保存，按草稿画 */
-const avatarWithFrame=(a,fid)=>avatarInner(a)+frameImg(((frames||[]).find(x=>x.id===fid)||{}).src||'');
+const avatarWithFrame=(a,fid)=>avatarInner(a)+frameImg((frames||[]).find(x=>x.id===fid)||null);
 function fmtTime(ts){
   const d=new Date(ts),n=new Date();
   const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
@@ -4556,8 +4581,10 @@ const rgb2hex=a=>'#'+a.map(x=>Math.max(0,Math.min(255,Math.round(x))).toString(1
 const mixTo=(h,t,k)=>rgb2hex(hex2rgb(h).map((v,i)=>v+(t[i]-v)*k));
 /* ---------- 头像框 ---------- */
 let frames=[];
+/* 100% = 框的内圈正好等于头像；默认 108% 让环压住头像边缘一点。老默认值 135 是没有自动适配时的，当成没设过 */
+const frameScaleVal=()=>(S.frameScale&&S.frameScale!==135)?+S.frameScale:108;
 function applyFrameScale(){
-  document.documentElement.style.setProperty('--frame-scale',(S.frameScale||135)+'%');
+  document.documentElement.style.setProperty('--frame-scale',frameScaleVal()+'%');
 }
 /* 白底 / 纯色底的框图自动抠成透明：从四角和正中心做泛洪，和底色接近的连通区域变透明。
    已经有透明像素的（真 PNG）不动。 */
@@ -4603,6 +4630,39 @@ async function frameCutout(src,maxW){
   ctx.putImageData(id,0,0);
   return {src:cv.toDataURL('image/png'),cut:true};
 }
+/* 裁掉透明边、补成正方形，再从圆心往外量内圈半径 → fit = 边长 / 内圈直径。
+   显示时框宽 = 头像 × fit × 缩放，这样内圈永远正好套住头像，不管原图留白多少 */
+async function frameFit(src){
+  const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('图片读不出来')); i.src=src; });
+  const w=img.width, h=img.height;
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0);
+  const d=ctx.getImageData(0,0,w,h).data;
+  let x0=w,y0=h,x1=-1,y1=-1;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){ if(d[(y*w+x)*4+3]>24){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; } }
+  if(x1<0) return {src,fit:1.35};
+  const pad=2, bw=x1-x0+1+pad*2, bh=y1-y0+1+pad*2, S0=Math.max(bw,bh);
+  const out=document.createElement('canvas'); out.width=out.height=S0;
+  const oc=out.getContext('2d');
+  oc.drawImage(cv,x0-pad,y0-pad,bw,bh,Math.round((S0-bw)/2),Math.round((S0-bh)/2),bw,bh);
+  const od=oc.getImageData(0,0,S0,S0).data, c=S0/2;
+  let dmin=Infinity;
+  for(let a=0;a<72;a++){
+    const ang=a*Math.PI/36, dx=Math.cos(ang), dy=Math.sin(ang);
+    let r=0;
+    for(;r<c;r+=1){ const x=Math.round(c+dx*r), y=Math.round(c+dy*r); if(x<0||y<0||x>=S0||y>=S0) break; if(od[(y*S0+x)*4+3]>40) break; }
+    if(r<dmin) dmin=r;
+  }
+  let fit=1.35;
+  if(Number.isFinite(dmin)&&dmin>S0*0.08) fit=Math.max(1.05,Math.min(3.5,S0/(2*dmin)));
+  return {src:out.toDataURL('image/png'),fit:Math.round(fit*100)/100};
+}
+/* 老框没有 fit 的补一次 */
+async function warmFrames(){
+  let n=0;
+  for(const f of frames){ if(f.fit) continue; try{ const r=await frameFit(f.src); f.src=r.src; f.fit=r.fit; await dbPut('frames',f); n++; }catch(e){} }
+  if(n){ frames=await dbAll('frames'); if(document.getElementById('s-chat').classList.contains('active')) renderChat(); }
+}
 async function importFrames(inp){
   const files=[...(inp.files||[])]; inp.value='';
   let n=0, cut=0;
@@ -4611,7 +4671,8 @@ async function importFrames(inp){
     try{
       const raw=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(new Error('读不出来')); fr.readAsDataURL(f); });
       const r=await frameCutout(raw,512);
-      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',src:r.src,at:Date.now()});
+      const ft=await frameFit(r.src);
+      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',src:ft.src,fit:ft.fit,at:Date.now()});
       n++; if(r.cut) cut++;
     }catch(e){ toast(f.name+'：'+e.message); }
   }
@@ -6303,18 +6364,18 @@ function renderSettings(){
       <div class="cell static"><div class="lbl">显示头像框</div>
         <label class="switch"><input type="checkbox" ${S.frameOn!==false?'checked':''}
           onchange="S.frameOn=this.checked;dbPut('settings',S);renderSettings()"><i></i></label></div>
-      <div class="field"><label>框的大小　<b id="fs-val">${S.frameScale||135}%</b>　不同来源的框留白不一样，自己对一下</label>
-        <input type="range" min="105" max="175" step="5" value="${S.frameScale||135}"
+      <div class="field"><label>框的大小　<b id="fs-val">${frameScaleVal()}%</b>　100% = 内圈正好套住头像，往右框往外扩</label>
+        <input type="range" min="80" max="150" step="2" value="${frameScaleVal()}"
           oninput="document.getElementById('fs-val').textContent=this.value+'%';document.documentElement.style.setProperty('--frame-scale',this.value+'%')"
           onchange="S.frameScale=+this.value;dbPut('settings',S)"></div>
     </div>
     <div class="framegrid">${frames.map(f=>`
       <div class="framecard" onclick="if(!guard())frameMenu('${f.id}')">
-        <div class="fdemo">${frameImg(f.src)}</div><span>${esc(f.name)}</span></div>`).join('')}
+        <div class="fdemo">${frameImg(f)}</div><span>${esc(f.name)}</span></div>`).join('')}
       <div class="frameadd" onclick="document.getElementById('frameFile').click()">${IC('plus',20)}上传</div>
     </div>
     <input type="file" id="frameFile" accept="image/*" multiple style="display:none" onchange="importFrames(this)">
-    <div class="hint">白底或纯色底的图会自动抠成透明（从四角和正中心把底色去掉，元素有描边就不会误伤），真透明的 PNG 直接用。
+    <div class="hint">上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边、量出内圈大小——不管原图留白多少，内圈都会正好套住头像。
       给谁戴：编辑角色 / 编辑身份里选。头像是 emoji 的戴不了框，得用图片头像。</div>
 
     <div class="grouptitle">系统沉浸</div>
@@ -9538,8 +9599,8 @@ const img2Ready=()=>{ const g=img2Cfg(); return !!g.on&&!!imgEndpoint(g).base; }
 const imgReadyFor=char=>char?imgReady():(imgReady()||img2Ready());
 
 let draftImg=null;
-let draftImg2=null, vibeSel=null;
-function openImgCfg(){ draftImg=imgCfg(); draftImg2=img2Cfg(); vibeSel=null; renderImgCfg(); show('s-imgset'); }
+let draftImg2=null, vibeSel=null, vibeTab='group';
+function openImgCfg(){ draftImg=migrateVibeGroups(imgCfg()); draftImg2=img2Cfg(); vibeSel=null; vibeTab='group'; renderImgCfg(); show('s-imgset'); }
 function setImg2(k,v){ readImgForm(); draftImg2[k]=v; renderImgCfg(); }
 function renderImgCfg(){
   const g=draftImg, g2=draftImg2||img2Cfg();
@@ -9615,48 +9676,68 @@ function renderImgCfg(){
       <br>当前会拼成：<code>${esc((g.order||'').split(',').map(k=>
         ({char:'角色固定词',scene:'画面描述',artist:'画师串',quality:'质量词'})[k.trim()]||k).join(' , '))}</code></div>
 
-    <div class="grouptitle">Vibe Transfer　${(g.vibes||[]).filter(v=>v.on!==false).length}/${(g.vibes||[]).length} 启用</div>
+    <div class="grouptitle">Vibe Transfer</div>
     <div class="group"><div class="cell static"><div class="lbl">启用 Vibe</div>
       <label class="switch"><input type="checkbox" ${g.vibeOn?'checked':''}
         onchange="setImg('vibeOn',this.checked)"><i></i></label></div></div>
-    ${(()=>{ const gs=[...new Set((g.vibes||[]).map(v=>v.group||'').filter(Boolean))];
-      return gs.length?`<div style="padding:2px 2px 8px">${gs.map(gn=>{
-        const vs=g.vibes.filter(v=>(v.group||'')===gn), onN=vs.filter(v=>v.on!==false).length;
-        return `<span class="chip ${onN===vs.length?'on':''}" onclick="toggleVibeGroup('${esc(gn)}')">${esc(gn)} ${onN}/${vs.length}</span>`;
-      }).join('')}</div>`:''; })()}
-    <div class="vibegrid">${(g.vibes||[]).map(v=>
-      `<div class="vibecard ${v.on!==false?'on':'off'}${vibeSel===v.id?' sel':''}" onclick="if(!guard())vibePick('${v.id}')"
-        data-lp="vibeMenu" data-lpid="${v.id}">${v.src?`<img src="${esc(v.src)}" alt="">`:`<div class="vibeph">${esc(String(v.name||'v').slice(0,2))}</div>`}
-        ${v.enc?'<span class="vtag">文件</span>':''}
-        <span class="vn">${esc(v.name)} ${(+v.strength||0.6).toFixed(1)}</span></div>`).join('')}
-      <div class="vibeadd" onclick="addVibe()">${IC('plus',20)}上传</div></div>
-    ${(()=>{ const v=(g.vibes||[]).find(x=>x.id===vibeSel); if(!v) return '';
-      const opts=v.enc?vibeInfoOptions(v):[];
-      return `<div class="group" style="margin-top:2px">
-      <div class="cell static"><div class="lbl">${esc(v.name)}${v.group?` <small style="color:var(--sub)">· ${esc(v.group)}</small>`:''}</div>
-        <label class="switch"><input type="checkbox" ${v.on!==false?'checked':''}
-          onchange="vibeSet('${v.id}','on',this.checked)"><i></i></label></div>
-      <div class="field"><label>强度　<b id="vs-str">${(+v.strength||0.6).toFixed(2)}</b>　越大越像参考图</label>
-        <input type="range" min="0.05" max="1" step="0.05" value="${+v.strength||0.6}"
-          oninput="document.getElementById('vs-str').textContent=(+this.value).toFixed(2)"
-          onchange="vibeSet('${v.id}','strength',parseFloat(this.value))"></div>
-      ${opts.length?`<div class="field"><label>信息提取　文件里带了这几档</label>
-        <div class="seg">${opts.map(x=>`<div class="${Math.abs((+v.info||1)-x)<0.005?'on':''}" onclick="vibeSet('${v.id}','info',${x})">${x}</div>`).join('')}</div></div>`
-      :`<div class="field"><label>信息提取　<b id="vs-info">${(+v.info||1).toFixed(2)}</b>　越大越抓细节</label>
-        <input type="range" min="0.05" max="1" step="0.05" value="${+v.info||1}"
-          oninput="document.getElementById('vs-info').textContent=(+this.value).toFixed(2)"
-          onchange="vibeSet('${v.id}','info',parseFloat(this.value))"></div>`}
-      <div class="inline" style="padding:4px 0 6px;gap:8px">
-        <button class="mini" onclick="vibeRename('${v.id}')">改名</button>
-        ${v.src?`<button class="mini" onclick="openViewer(draftImg.vibes.find(x=>x.id==='${v.id}').src)">看图</button>`:''}
-        <button class="mini" style="color:var(--danger)" onclick="vibeDel('${v.id}')">删除</button>
-        <span style="flex:1"></span>
-        <button class="mini" onclick="vibeSel=null;renderImgCfg()">收起</button></div>
-      </div>`; })()}
-    <div class="hint">「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 文件，也认 vibe 组导出的 <b>.json</b>（groups / vibeData 那种）（自带编码，用的时候不扣点数；bundle 会按文件名成一组，点上面的组名整组开关），也认图片（V4 每次编码要扣点数）。<br>
-      点卡片展开面板调强度 / 信息提取 / 开关，长按也有菜单。<br>
-      <b>只对 nai-diffusion-3 / 4 系列生效</b>，V5 或其他后端会自动跳过，不会报错。
-      V4 系列需要反代提供 <code>/ai/encode-vibe</code> 端点，没有的话本次生成会自动不带 vibe。</div>
+    ${(()=>{ migrateVibeGroups(g); const groups=g.vibeGroups, grp=groups.find(x=>x.id===g.activeGroup)||null;
+      const lib=g.vibes||[]; const vibeOf=vid=>lib.find(v=>v.id===vid);
+      const card=(v,extra,onCls)=>`<div class="vibecard ${onCls}${vibeSel===v.id?' sel':''}" onclick="if(!guard())vibePick('${v.id}')"
+          data-lp="vibeMenu" data-lpid="${v.id}">${v.src?`<img src="${esc(v.src)}" alt="">`:`<div class="vibeph">${esc(String(v.name||'v').slice(0,2))}</div>`}
+          ${v.enc?'<span class="vtag">文件</span>':''}<span class="vn">${esc(v.name)} ${extra}</span></div>`;
+      const sliders=(v,it,setter)=>{ const opts=v.enc?vibeInfoOptions(v):[]; const st=Number.isFinite(+it.strength)?+it.strength:(+v.strength||0.6), inf=Number.isFinite(+it.info)?+it.info:(+v.info||1);
+        return `<div class="field"><label>强度　<b id="vs-str">${st.toFixed(2)}</b>　越大越像参考图</label>
+          <input type="range" min="0.05" max="1" step="0.05" value="${st}"
+            oninput="document.getElementById('vs-str').textContent=(+this.value).toFixed(2)"
+            onchange="${setter}('${v.id}','strength',parseFloat(this.value))"></div>
+        ${opts.length?`<div class="field"><label>信息提取　文件里带了这几档</label>
+          <div class="seg">${opts.map(x=>`<div class="${Math.abs(inf-x)<0.005?'on':''}" onclick="${setter}('${v.id}','info',${x})">${x}</div>`).join('')}</div></div>`
+        :`<div class="field"><label>信息提取　<b id="vs-info">${inf.toFixed(2)}</b>　越大越抓细节</label>
+          <input type="range" min="0.05" max="1" step="0.05" value="${inf}"
+            oninput="document.getElementById('vs-info').textContent=(+this.value).toFixed(2)"
+            onchange="${setter}('${v.id}','info',parseFloat(this.value))"></div>`}`; };
+      let body='';
+      if(vibeTab!=='lib'){
+        const chips=groups.map(x=>`<span class="chip ${x.id===g.activeGroup?'on':''}" onclick="vgSelect('${x.id}')">${esc(x.name)} ${(x.items||[]).filter(i=>i.on!==false).length}/${(x.items||[]).length}</span>`).join('')
+          +`<span class="chip" style="border-style:dashed;color:var(--sub)" onclick="vgNew()">＋ 新组</span>`;
+        body=`<div style="padding:2px 2px 8px">${chips}</div>`;
+        if(grp){
+          const items=(grp.items||[]).map(it=>({it,v:vibeOf(it.vid)})).filter(x=>x.v);
+          body+=`<div class="inline" style="padding:0 2px 8px;gap:8px;font-size:12.5px;color:var(--sub)">
+              <span>生图用「<b style="color:var(--text)">${esc(grp.name)}</b>」里开着的 ${items.filter(x=>x.it.on!==false).length} 张</span><span style="flex:1"></span>
+              <button class="mini" onclick="vgRename()">改名</button><button class="mini" style="color:var(--danger)" onclick="vgDel()">删组</button></div>
+            <div class="vibegrid">${items.map(({it,v})=>card(v,(Number.isFinite(+it.strength)?+it.strength:+v.strength||0.6).toFixed(1),it.on!==false?'on':'off')).join('')}
+              <div class="vibeadd" onclick="vgAddFromLib()">${IC('plus',20)}从库里加</div></div>`;
+          const sel=items.find(x=>x.v.id===vibeSel);
+          if(sel) body+=`<div class="group" style="margin-top:2px">
+            <div class="cell static"><div class="lbl">${esc(sel.v.name)} <small style="color:var(--sub)">· 在「${esc(grp.name)}」里的设置</small></div>
+              <label class="switch"><input type="checkbox" ${sel.it.on!==false?'checked':''} onchange="vgItemSet('${sel.v.id}','on',this.checked)"><i></i></label></div>
+            ${sliders(sel.v,sel.it,'vgItemSet')}
+            <div class="inline" style="padding:4px 0 6px;gap:8px">
+              ${sel.v.src?`<button class="mini" onclick="openViewer(draftImg.vibes.find(x=>x.id==='${sel.v.id}').src)">看图</button>`:''}
+              <button class="mini" style="color:var(--danger)" onclick="vgRemove('${sel.v.id}')">移出组</button>
+              <span style="flex:1"></span><button class="mini" onclick="vibeSel=null;renderImgCfg()">收起</button></div></div>`;
+        }else body+=`<div class="hint">还没有组。点「＋ 新组」建一个，或者导入 bundle / vibe 组文件会自动成组。</div>`;
+      }else{
+        body=`<div class="vibegrid">${lib.map(v=>card(v,(+v.strength||0.6).toFixed(1),'on')).join('')}
+            <div class="vibeadd" onclick="addVibe()">${IC('plus',20)}上传</div></div>`;
+        const v=lib.find(x=>x.id===vibeSel);
+        if(v) body+=`<div class="group" style="margin-top:2px">
+          <div class="cell static"><div class="lbl">${esc(v.name)} <small style="color:var(--sub)">· 库里的默认值</small></div>
+            ${grp&&!(grp.items||[]).some(i=>i.vid===v.id)?`<button class="mini" onclick="vgAddVid('${v.id}')">加进「${esc(grp.name)}」</button>`:(grp?`<small style="color:var(--sub)">已在「${esc(grp.name)}」</small>`:'')}</div>
+          ${sliders(v,{},'vibeSet')}
+          <div class="inline" style="padding:4px 0 6px;gap:8px">
+            <button class="mini" onclick="vibeRename('${v.id}')">改名</button>
+            ${v.src?`<button class="mini" onclick="openViewer(draftImg.vibes.find(x=>x.id==='${v.id}').src)">看图</button>`:''}
+            <button class="mini" style="color:var(--danger)" onclick="vibeDel('${v.id}')">删除</button>
+            <span style="flex:1"></span><button class="mini" onclick="vibeSel=null;renderImgCfg()">收起</button></div></div>`;
+      }
+      return `<div class="seg" style="margin:0 0 10px">
+        <div class="${vibeTab!=='lib'?'on':''}" onclick="vibeTab='group';vibeSel=null;renderImgCfg()">组　生图用这里</div>
+        <div class="${vibeTab==='lib'?'on':''}" onclick="vibeTab='lib';vibeSel=null;renderImgCfg()">全部　${lib.length}</div></div>`+body; })()}
+    <div class="hint">生图只参考<b>当前选中的组</b>，库（全部）只是仓库。组里每张 vibe 有自己的强度和信息提取，和库里的默认值分开。
+      「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 和 vibe 组导出的 <b>.json</b>（自带编码，用的时候不扣点数；带组名的会自动成组），也认图片（V4 每次编码要扣点数）。
+      <b>只对 nai-diffusion-3 / 4 系列生效</b>，V5 或其他后端会自动跳过，不会报错。</div>
 
     <div class="grouptitle">质量词</div>
     <div class="group"><div class="field">
@@ -9826,8 +9907,10 @@ function pushVibe(rec){
 }
 async function importVibeFiles(inp){
   const files=[...(inp.files||[])]; if(!files.length) return;
+  migrateVibeGroups(draftImg);
   draftImg.vibes=draftImg.vibes||[];
-  let n=0, bad=0;
+  let n=0, bad=0; const byGroup={}, single=[];
+  const take=(rec,gn)=>{ if(pushVibe(rec)){ n++; if(gn){ (byGroup[gn]=byGroup[gn]||[]).push({vid:rec.id,strength:rec.strength,info:rec.info,on:true}); } else single.push(rec); return true; } return false; };
   for(const f of files){
     try{
       if(/\.(naiv4vibe|naiv4vibebundle|json)$/i.test(f.name)){
@@ -9835,7 +9918,6 @@ async function importVibeFiles(inp){
         const base=f.name.replace(/\.(naiv4vibe|naiv4vibebundle|json)$/i,'');
         let dup=0;
         if(j.vibeData&&typeof j.vibeData==='object'){
-          // 「vibe 组」导出：groups → vibeData，vibePresets 里有人起的名字
           const nameOf={};
           for(const [pn,p] of Object.entries(j.vibePresets||{})) if(p&&p.vibeDataId&&!nameOf[p.vibeDataId]) nameOf[p.vibeDataId]=pn;
           const groups=Object.entries(j.groups||{});
@@ -9846,38 +9928,88 @@ async function importVibeFiles(inp){
                 const rec=vibeFromNai(v,String(gn).slice(0,12));
                 if(nameOf[it.vibeDataId]) rec.name=String(nameOf[it.vibeDataId]).slice(0,14);
                 if(Number.isFinite(+it.strength)&&+it.strength>0) rec.strength=+it.strength;
-                if(pushVibe(rec)) n++; else dup++;
+                if(!take(rec,String(gn).slice(0,12))) dup++;
               }
             }
           }else{
             for(const [vid,v] of Object.entries(j.vibeData)){
               const rec=vibeFromNai(v,base.slice(0,12));
               if(nameOf[vid]) rec.name=String(nameOf[vid]).slice(0,14);
-              if(pushVibe(rec)) n++; else dup++;
+              if(!take(rec,base.slice(0,12))) dup++;
             }
           }
         }else if(Array.isArray(j.vibes)){
-          for(const v of j.vibes){ if(pushVibe(vibeFromNai(v,base.slice(0,12)))) n++; else dup++; }
+          for(const v of j.vibes){ if(!take(vibeFromNai(v,base.slice(0,12)),base.slice(0,12))) dup++; }
         }else if(j.encodings||j.thumbnail){
-          if(pushVibe(vibeFromNai(j,''))) n++; else dup++;
+          if(!take(vibeFromNai(j,''),'')) dup++;
         }else throw new Error('不是 NovelAI 的 vibe 文件');
         if(dup) toast(f.name+'：'+dup+' 个已经有了，跳过');
       }else if(/^image\//.test(f.type)){
         const d=await fileToDataUrl(f,640);
-        draftImg.vibes.push({id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,10)||'vibe',src:d,info:1,strength:0.6,on:true,group:''});
-        n++;
+        take({id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,10)||'vibe',src:d,info:1,strength:0.6,on:true,group:''},'');
       }else throw new Error('不认识的文件');
     }catch(e){ bad++; toast(f.name+'：'+e.message); }
   }
+  // 成组：文件里带组名的建组（同名就并进去）；散的加进当前组
+  let lastGid='';
+  for(const [gn,items] of Object.entries(byGroup)){
+    let grp=draftImg.vibeGroups.find(x=>x.name===gn);
+    if(!grp){ grp={id:uid(),name:gn,items:[]}; draftImg.vibeGroups.push(grp); }
+    for(const it of items) if(!grp.items.some(x=>x.vid===it.vid)) grp.items.push(it);
+    lastGid=grp.id;
+  }
+  if(single.length){
+    let grp=draftImg.vibeGroups.find(x=>x.id===draftImg.activeGroup);
+    if(!grp){ grp={id:uid(),name:'当前',items:[]}; draftImg.vibeGroups.push(grp); draftImg.activeGroup=grp.id; }
+    for(const rec of single) if(!grp.items.some(x=>x.vid===rec.id)) grp.items.push({vid:rec.id,strength:rec.strength,info:rec.info,on:true});
+    lastGid=lastGid||grp.id;
+  }
+  if(!draftImg.activeGroup&&lastGid) draftImg.activeGroup=lastGid;
+  vibeTab='group'; vibeSel=null;
   renderImgCfg();
   if(n) toast('加了 '+n+' 个 vibe'+(bad?'，'+bad+' 个没读出来':''));
 }
-function toggleVibeGroup(gn){
-  readImgForm();
-  const vs=(draftImg.vibes||[]).filter(v=>(v.group||'')===gn);
-  const allOn=vs.every(v=>v.on!==false);
-  vs.forEach(v=>{ v.on=!allOn; });
-  renderImgCfg();
+/* ---- 组操作 ---- */
+function vgActive(){ migrateVibeGroups(draftImg); return draftImg.vibeGroups.find(x=>x.id===draftImg.activeGroup)||null; }
+function vgSelect(id){ readImgForm(); migrateVibeGroups(draftImg); draftImg.activeGroup=id; vibeSel=null; renderImgCfg(); }
+function vgNew(){
+  readImgForm(); migrateVibeGroups(draftImg);
+  const n=prompt('组的名字：','组 '+(draftImg.vibeGroups.length+1)); if(n===null||!n.trim()) return;
+  const grp={id:uid(),name:n.trim().slice(0,12),items:[]};
+  draftImg.vibeGroups.push(grp); draftImg.activeGroup=grp.id; vibeSel=null; renderImgCfg();
+}
+function vgRename(){
+  readImgForm(); const grp=vgActive(); if(!grp) return;
+  const n=prompt('组的名字：',grp.name); if(n&&n.trim()){ grp.name=n.trim().slice(0,12); renderImgCfg(); }
+}
+function vgDel(){
+  readImgForm(); const grp=vgActive(); if(!grp) return;
+  if(!confirm('删除组「'+grp.name+'」？库里的 vibe 不会删。')) return;
+  draftImg.vibeGroups=draftImg.vibeGroups.filter(x=>x.id!==grp.id);
+  draftImg.activeGroup=draftImg.vibeGroups.length?draftImg.vibeGroups[0].id:''; vibeSel=null; renderImgCfg();
+}
+function vgAddVid(vid){
+  readImgForm(); let grp=vgActive();
+  if(!grp){ grp={id:uid(),name:'当前',items:[]}; draftImg.vibeGroups.push(grp); draftImg.activeGroup=grp.id; }
+  const v=(draftImg.vibes||[]).find(x=>x.id===vid); if(!v) return;
+  if(!grp.items.some(x=>x.vid===vid)) grp.items.push({vid,strength:v.strength,info:v.info,on:true});
+  vibeTab='group'; vibeSel=vid; renderImgCfg(); toast('已加进「'+grp.name+'」');
+}
+function vgAddFromLib(){
+  readImgForm(); const grp=vgActive(); if(!grp) return toast('先建一个组');
+  const rest=(draftImg.vibes||[]).filter(v=>!grp.items.some(x=>x.vid===v.id));
+  if(!rest.length) return toast('库里的 vibe 都在这个组里了');
+  actionSheet('加进「'+grp.name+'」',rest.map(v=>({t:v.name,av:v.src||'',fn:()=>vgAddVid(v.id)})));
+}
+function vgRemove(vid){
+  readImgForm(); const grp=vgActive(); if(!grp) return;
+  grp.items=grp.items.filter(x=>x.vid!==vid); if(vibeSel===vid) vibeSel=null; renderImgCfg();
+}
+function vgItemSet(vid,k,val){
+  readImgForm(); const grp=vgActive(); if(!grp) return;
+  const it=grp.items.find(x=>x.vid===vid); if(!it) return;
+  if(k==='strength'||k==='info') val=Math.max(0.05,Math.min(1,+val||0));
+  it[k]=val; renderImgCfg();
 }
 function toggleVibe(id){
   if(guard()) return;
@@ -9900,7 +10032,9 @@ function vibeRename(id){
 function vibeDel(id){
   readImgForm();
   if(!confirm('删除这个 vibe？')) return;
-  draftImg.vibes=draftImg.vibes.filter(x=>x.id!==id); if(vibeSel===id) vibeSel=null; renderImgCfg();
+  draftImg.vibes=draftImg.vibes.filter(x=>x.id!==id);
+  for(const grp of (draftImg.vibeGroups||[])) grp.items=(grp.items||[]).filter(x=>x.vid!==id);
+  if(vibeSel===id) vibeSel=null; renderImgCfg();
 }
 /* 文件里各模型编码自带的信息提取档位（同一个 vibe 可能存了好几档） */
 function vibeInfoOptions(v){
@@ -9913,21 +10047,14 @@ function vibeInfoOptions(v){
   return [...out].sort((a,b)=>a-b);
 }
 function vibeMenu(id){
-  const v=draftImg.vibes.find(x=>x.id===id);
+  const v=draftImg.vibes.find(x=>x.id===id); if(!v) return;
+  const grp=vgActive();
   actionSheet(v.name,[
-    {ic:'edit',t:'改名字',fn:()=>{ const n=prompt('名字：',v.name);
-      if(n&&n.trim()){ v.name=n.trim().slice(0,10); renderImgCfg(); } }},
-    {ic:'sparkle',t:`强度　当前 ${(+v.strength||0.6).toFixed(1)}`,fn:()=>{
-      const x=prompt('强度 0.1–1.0，越大越像参考图：',String(v.strength||0.6));
-      if(x===null) return;
-      v.strength=Math.max(0.1,Math.min(1,parseFloat(x)||0.6)); renderImgCfg(); }},
-    {ic:'note',t:`信息提取　当前 ${(+v.info||1).toFixed(1)}`,fn:()=>{
-      const x=prompt('信息提取 0.1–1.0，越大越抓细节：',String(v.info||1));
-      if(x===null) return;
-      v.info=Math.max(0.1,Math.min(1,parseFloat(x)||1)); renderImgCfg(); }},
+    {ic:'edit',t:'改名字',fn:()=>vibeRename(id)},
+    ...(grp&&!(grp.items||[]).some(i=>i.vid===id)?[{ic:'plus',t:'加进「'+grp.name+'」',fn:()=>vgAddVid(id)}]:[]),
+    ...(grp&&(grp.items||[]).some(i=>i.vid===id)?[{ic:'minus',t:'移出「'+grp.name+'」',fn:()=>vgRemove(id)}]:[]),
     ...(v.src?[{ic:'image',t:'查看原图',fn:()=>openViewer(v.src)}]:[]),
-    {ic:'trash',t:'删除',danger:true,fn:()=>{
-      draftImg.vibes=draftImg.vibes.filter(x=>x.id!==id); renderImgCfg(); }}
+    {ic:'trash',t:'从库里删除',danger:true,fn:()=>vibeDel(id)}
   ]);
 }
 function pickSampler(){
@@ -10083,11 +10210,30 @@ function vibeEncFor(v,model){
   }
   return typeof e==='string'&&e.length>20?e:null;
 }
+/* 组：生图只参考当前选中的组，库里的 vibe 本身不参与。老数据没有组的，按 v.group / v.on 临时凑一份 */
+function vibeGroupsOf(g){
+  if(Array.isArray(g.vibeGroups)) return {groups:g.vibeGroups,active:g.activeGroup||''};
+  const vibes=g.vibes||[]; const groups=[];
+  const names=[...new Set(vibes.map(v=>v.group||'').filter(Boolean))];
+  for(const n of names) groups.push({id:'vg_'+n,name:n,items:vibes.filter(v=>(v.group||'')===n).map(v=>({vid:v.id,strength:v.strength,info:v.info,on:v.on!==false}))});
+  const loose=vibes.filter(v=>!v.group&&v.on!==false);
+  if(loose.length) groups.unshift({id:'vg_cur',name:'当前',items:loose.map(v=>({vid:v.id,strength:v.strength,info:v.info,on:true}))});
+  return {groups,active:groups.length?groups[0].id:''};
+}
+function migrateVibeGroups(g){
+  if(Array.isArray(g.vibeGroups)) return g;
+  const r=vibeGroupsOf(g); g.vibeGroups=r.groups; g.activeGroup=r.active; return g;
+}
 async function buildVibeParams(g){
   if(!g.vibeOn) return null;
-  const on=(g.vibes||[]).filter(v=>v.on!==false&&(v.src||v.enc));
-  if(!on.length) return null;
   if(!vibeSupported(g.model)) return null;
+  const {groups,active}=vibeGroupsOf(g);
+  const grp=groups.find(x=>x.id===active); if(!grp) return null;
+  const on=(grp.items||[]).filter(it=>it.on!==false).map(it=>{
+    const v=(g.vibes||[]).find(x=>x.id===it.vid); if(!v||!(v.src||v.enc)) return null;
+    return {...v,strength:Number.isFinite(+it.strength)?+it.strength:v.strength,info:Number.isFinite(+it.info)?+it.info:v.info};
+  }).filter(Boolean);
+  if(!on.length) return null;
   const isV4=/nai-diffusion-4/.test(g.model);
   const imgs=[], used=[];
   for(const v of on){
@@ -10096,7 +10242,6 @@ async function buildVibeParams(g){
       if(pre){ imgs.push(pre); used.push(v); continue; }
       // 文件来的 vibe 只有缩略图，拿它去编码又糊又扣点数：缺当前模型的编码就直接跳过
       if(!v.src||v.enc){ toast('vibe「'+v.name+'」没有当前模型的编码，已跳过'); continue; }
-      // 图片来的 vibe：V4 要先编码（这一步扣点数）；反代没这个端点就跳过 vibe，不要让整张图失败
       try{
         const r=await fetch(g.base.replace(/\/+$/,'')+'/ai/encode-vibe',{
           method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+g.key},
@@ -13214,6 +13359,7 @@ async function ensurePersona(){
   applyTheme(S.accent); applyFrameScale();
   await loadAll();
   try{ await applyFont(); }catch(e){ console.warn('字体应用失败',e); }
+  warmFrames().catch(()=>{});
   await ensurePersona();
 
   initKeyboardFix();
