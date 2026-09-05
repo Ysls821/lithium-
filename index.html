@@ -3349,10 +3349,26 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 请求的其余项（params_version 3、karras、k_euler_ancestral、scale 5、v4_prompt / v4_negative_prompt 结构、cfg_rescale 0、skip_cfg_above_sigma null）和官方一致。
 
+### 2026-09-05（二十四）· 画师串堆积的根因 + 生图设置页重排成「小 NAI 前端」
+
+用户把「上一次实际发给生图接口的内容」贴出来，一眼看到：**画师串那一栏里塞的是负向提示词**——V4.5 Heavy 负向重复三遍，后面还接着一大串带权重的负向。画师串拼进正向，最终正向开头全是 lowres / worst quality，出来的图自然诡异。她说画师串「不会切换而是会堆积」。
+
+**堆积的根因**：`setImg(k,v)` 的写法是「先改 `draftImg[k]=v`，再 `readImgForm()`，再改一次」。切换画师串时 `activeArtist` 先变成新的，`readImgForm` 接着把 textarea 里**旧那套的文字**写进了**新那套**。每点一次名字就复制一次，几套互相覆盖、越叠越长。改成先读表单再改值。
+
+**页面重排**（用户要求：字段一一对应、填了就存、切换不堆积）：
+
+- 顶部到底：后端 → 参数（加了噪声调度 karras / exponential / polyexponential / native）→ **提示词装配**（质量词 / 画师串预设 / 角色提示词）→ 提示词顺序 → **「拼出来会是这样」**正向负向预览 → **负向预设** → Vibe → 第二后端 → 自动配图 → 上一次请求 → 诊断
+- **负向也做成预设**：`negatives:[{id,name,text}]` + `activeNegative`，老的单字符串迁成「默认」；长按有「填入 NAI V4.5 官方 Heavy 负向」；`buildImgNegative` 用当前预设
+- **角色提示词进设置页**：列出每个角色的固定外貌 tag 和额外负向，直接改，写回角色记录（和编辑角色是同一份）
+- **填了就存**：每次重渲染存一次，输入框打字 500ms 后存；「保存」按钮改成「保存并返回」
+- 画师串 textarea 的标签写明「只写画师 tag」，顶部提示「负向单独发，不要粘进正向任何一栏」
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **先改状态再读表单 = 把旧值写进新槽位** → 凡是「表单 → 草稿」的同步，必须在切换选中项**之前**做完。这个 bug 表现成「预设互相污染」，用户描述是「堆积」，查了很久才对上。
+- **用户贴出实际请求，比任何推理都快** → 前面几轮猜 vibe、猜采样参数都有道理，但真正的问题是一栏填错了内容；「上一次实际发出去的内容」面板一上线，一条消息就定位了。
 - **接第三方模型接口，先拿官方或成熟客户端的默认预设逐项对** → 缺的字段服务端不会报错，只会悄悄按旧行为跑，表现成「图质量差」这种最难归因的问题。凡是有默认预设文件的接口，把它当清单，一项一项核。
 - **「像没用提示词」不一定是提示词没传** → 提示词明明在请求里，采样参数不对照样出这种图。先排除参数，再怀疑提示词。
 - **自动对齐和「用户按规范做」是两条路，都要留** → 自动裁边适合随手生的图，但会破坏用户精心摆好的位置；给一个固定模板 + 「不裁边」开关，用户愿意按规范做时就能一次到位。
@@ -9663,7 +9679,18 @@ const IMG_BACKENDS={chat:'聊天接口',novelai:'NovelAI',a1111:'SD WebUI (A1111
 const NAI_MODELS=['nai-diffusion-4-5-full','nai-diffusion-4-5-curated','nai-diffusion-4-full',
   'nai-diffusion-4-curated-preview','nai-diffusion-3','nai-diffusion-furry-3'];
 const NAI_SAMPLERS=['k_euler_ancestral','k_euler','k_dpmpp_2s_ancestral','k_dpmpp_2m_sde','k_dpmpp_sde','ddim_v3'];
-const imgCfg=()=>({...DEFAULT_SETTINGS.img,...(S.img||{})});
+/* 负向也做成可切换的预设；老数据只有一个 negative 字符串，迁成「默认」 */
+function migrateImgPresets(g){
+  if(!Array.isArray(g.negatives)||!g.negatives.length){
+    g.negatives=[{id:'n1',name:'默认',text:g.negative||''}]; g.activeNegative='n1';
+  }
+  if(!g.negatives.some(x=>x.id===g.activeNegative)) g.activeNegative=g.negatives[0].id;
+  if(!Array.isArray(g.artists)||!g.artists.length){ g.artists=[{id:'a1',name:'默认',text:''}]; g.activeArtist='a1'; }
+  if(!g.artists.some(x=>x.id===g.activeArtist)) g.activeArtist=g.artists[0].id;
+  return g;
+}
+const imgCfg=()=>migrateImgPresets({...DEFAULT_SETTINGS.img,...(S.img||{})});
+const activeNegText=g=>{ const n=(g.negatives||[]).find(x=>x.id===g.activeNegative); return n?n.text:(g.negative||''); };
 /* 生图实际打到哪：「聊天接口」后端地址 / Key 留空就用聊天那套 */
 function imgEndpoint(g){
   g=g||imgCfg();
@@ -9678,7 +9705,44 @@ const imgReadyFor=char=>char?imgReady():(imgReady()||img2Ready());
 
 let draftImg=null;
 let draftImg2=null, vibeSel=null, vibeTab='group';
-function openImgCfg(){ draftImg=migrateVibeGroups(imgCfg()); draftImg2=img2Cfg(); vibeSel=null; vibeTab='group'; renderImgCfg(); show('s-imgset'); }
+/* 填了就存：每次重渲染时存一次，输入框打字时延迟 500ms 存一次 */
+let _imgSaveT=null;
+function imgAutosave(){
+  if(!draftImg) return;
+  readImgForm(); migrateImgPresets(draftImg);
+  S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
+  dbPut('settings',S).catch(()=>{});
+}
+function imgAutosaveSoon(){ clearTimeout(_imgSaveT); _imgSaveT=setTimeout(imgAutosave,500); }
+/* 角色提示词在生图设置页里直接改，写回角色记录 */
+const _charImgT={};
+function charImgSoon(id,k,val){
+  clearTimeout(_charImgT[id+k]);
+  _charImgT[id+k]=setTimeout(async()=>{
+    const c=characters.find(x=>x.id===id); if(!c) return;
+    c[k]=val; await dbPut('characters',c); characters=await dbAll('characters');
+  },500);
+}
+function addNegative(){
+  readImgForm();
+  const n=prompt('这套负向叫什么？','新负向'); if(n===null||!n.trim()) return;
+  const id=uid(); draftImg.negatives.push({id,name:n.trim().slice(0,12),text:''});
+  draftImg.activeNegative=id; renderImgCfg();
+}
+function negMenu(id){
+  const a=draftImg.negatives.find(x=>x.id===id); if(!a) return;
+  actionSheet(a.name,[
+    {ic:'edit',t:'改名',fn:()=>{ const n=prompt('名字：',a.name); if(n&&n.trim()){ a.name=n.trim().slice(0,12); renderImgCfg(); } }},
+    {ic:'copy',t:'复制一套',fn:()=>{ const nid=uid(); draftImg.negatives.push({id:nid,name:a.name+' 副本',text:a.text}); draftImg.activeNegative=nid; renderImgCfg(); }},
+    {ic:'sparkle',t:'填入 NAI V4.5 官方 Heavy 负向',fn:()=>{ a.text='nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page'; renderImgCfg(); }},
+    {ic:'trash',t:'删除',danger:true,fn:()=>{
+      if(draftImg.negatives.length<=1) return toast('至少留一套');
+      draftImg.negatives=draftImg.negatives.filter(x=>x.id!==id);
+      if(draftImg.activeNegative===id) draftImg.activeNegative=draftImg.negatives[0].id;
+      renderImgCfg(); }}
+  ]);
+}
+function openImgCfg(){ draftImg=migrateVibeGroups(migrateImgPresets(imgCfg())); draftImg2=img2Cfg(); vibeSel=null; vibeTab='group'; renderImgCfg(); show('s-imgset'); }
 function setImg2(k,v){ readImgForm(); draftImg2[k]=v; renderImgCfg(); }
 function renderImgCfg(){
   const g=draftImg, g2=draftImg2||img2Cfg();
@@ -9728,21 +9792,43 @@ function renderImgCfg(){
       <div class="field"><label>CFG</label><input id="ig-cfg" type="number" step="0.5" min="1" max="20" value="${g.cfg}"></div>
       ${isNai?`<div class="field"><label>采样器</label>
         <div class="inline"><input id="ig-sampler" value="${esc(g.sampler)}">
-        <button class="mini" onclick="pickSampler()">选择</button></div></div>`
+        <button class="mini" onclick="pickSampler()">选择</button></div></div>
+      <div class="field"><label>噪声调度</label>
+        <select class="pssel" id="ig-noise" onchange="setImg('noise',this.value)">
+          ${['karras','exponential','polyexponential','native'].map(x=>`<option value="${x}" ${(g.noise||'karras')===x?'selected':''}>${x}</option>`).join('')}
+        </select></div>`
         :`<input type="hidden" id="ig-sampler" value="${esc(g.sampler)}">`}
     </div>
 
-    <div class="grouptitle">画师串　${g.artists.length} 套</div>
+    <div class="secband">提示词装配</div>
+    <div class="hint" style="margin-top:-6px">下面每一栏都是独立的，改了就存。生图时按「提示词顺序」拼成一条正向：画师串 + 角色固定词 + 画面 tag + 质量词。<b>负向单独发</b>，不要把负向粘进正向的任何一栏。</div>
+
+    <div class="grouptitle">质量词</div>
+    <div class="group"><div class="field">
+      <textarea id="ig-quality" style="min-height:52px" placeholder="best quality, very aesthetic, absurdres">${esc(g.quality)}</textarea></div></div>
+
+    <div class="grouptitle">画师串　${g.artists.length} 套　点名字切换</div>
     <div style="padding:2px 2px 6px">
       ${g.artists.map(a=>`<span class="chip ${g.activeArtist===a.id?'on':''}"
         onclick="setImg('activeArtist','${a.id}')" data-lp="artistMenu" data-lpid="${a.id}">${esc(a.name)}</span>`).join('')}
       <span class="chip" style="border-style:dashed;color:var(--sub)" onclick="addArtist()">＋ 新增</span>
     </div>
-    <div class="group"><div class="field"><label>当前这套的内容</label>
-      <textarea id="ig-artist" style="min-height:70px" placeholder="artist:xxx, artist:yyy, …"
+    <div class="group"><div class="field"><label>「${esc((g.artists.find(a=>a.id===g.activeArtist)||{}).name||'')}」的内容　只写画师 tag</label>
+      <textarea id="ig-artist" style="min-height:70px" placeholder="artist:xxx, artist:yyy, 0.8::artist:zzz::"
         oninput="updArtist(this.value)">${esc((g.artists.find(a=>a.id===g.activeArtist)||{}).text||'')}</textarea>
     </div></div>
-    <div class="hint">长按画师串可以改名或删除。切换只影响下次生成，不影响已生成的图。</div>
+    <div class="hint">每套只在选中时拼进正向，切换不会把内容带到另一套。长按名字改名 / 复制 / 删除。</div>
+
+    <div class="grouptitle">角色提示词　${characters.length} 个角色</div>
+    ${characters.length?characters.map(c=>`<div class="group" style="margin-bottom:10px">
+      <div class="cell static" style="padding-bottom:4px"><div class="lbl">${esc(c.name)}</div><small style="color:var(--sub)">聊天 / 生成页选到这个角色时自动带上</small></div>
+      <div class="field"><label>固定外貌 tag</label>
+        <textarea style="min-height:56px" placeholder="1boy, black hair, red eyes, …"
+          oninput="charImgSoon('${c.id}','imgPrompt',this.value)">${esc(c.imgPrompt||'')}</textarea></div>
+      <div class="field"><label>这个角色额外的负向　可空</label>
+        <input placeholder="glasses, beard" oninput="charImgSoon('${c.id}','imgNegative',this.value)" value="${esc(c.imgNegative||'')}"></div>
+    </div>`).join(''):`<div class="hint">还没有角色。</div>`}
+    <div class="hint">和「编辑角色」里的是同一份，这里改了那边也变。</div>
 
     <div class="grouptitle">提示词顺序</div>
     <div class="group"><div class="cell" onclick="pickOrder()">
@@ -9753,6 +9839,24 @@ function renderImgCfg(){
       顺序的实际影响没有传说中大（Danbooru 训练的 caption 本来就是乱序 tag），换着试就行。
       <br>当前会拼成：<code>${esc((g.order||'').split(',').map(k=>
         ({char:'角色固定词',scene:'画面描述',artist:'画师串',quality:'质量词'})[k.trim()]||k).join(' , '))}</code></div>
+
+    <div class="grouptitle">拼出来会是这样</div>
+    ${(()=>{ const part={quality:g.quality,artist:(g.artists.find(a=>a.id===g.activeArtist)||{}).text||'',char:'【角色固定词】',scene:'【画面 tag】'};
+      const pos=(g.order||'artist,char,scene,quality').split(',').map(k=>(part[k.trim()]||'').trim()).filter(Boolean).join(', ');
+      const neg=[activeNegText(g),'【角色额外负向】'].filter(Boolean).join(', ');
+      return `<div class="group" style="padding:8px 12px;font-size:12.5px;line-height:1.55">
+        <div style="color:var(--sub);margin-bottom:2px">正向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(pos)}</div>
+        <div style="color:var(--sub);margin:8px 0 2px">负向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(neg)}</div></div>`; })()}
+
+    <div class="grouptitle">负向提示词　${(g.negatives||[]).length} 套　点名字切换</div>
+    <div style="padding:2px 2px 6px">
+      ${(g.negatives||[]).map(a=>`<span class="chip ${g.activeNegative===a.id?'on':''}"
+        onclick="setImg('activeNegative','${a.id}')" data-lp="negMenu" data-lpid="${a.id}">${esc(a.name)}</span>`).join('')}
+      <span class="chip" style="border-style:dashed;color:var(--sub)" onclick="addNegative()">＋ 新增</span>
+    </div>
+    <div class="group"><div class="field"><label>「${esc(((g.negatives||[]).find(a=>a.id===g.activeNegative)||{}).name||'')}」的内容</label>
+      <textarea id="ig-negative" style="min-height:84px" placeholder="nsfw, lowres, worst quality, …">${esc(activeNegText(g))}</textarea></div></div>
+    <div class="hint">长按名字有「填入 NAI V4.5 官方 Heavy 负向」。角色自己的额外负向在上面角色提示词里填，生成时合并。</div>
 
     <div class="grouptitle">Vibe Transfer</div>
     <div class="group"><div class="cell static"><div class="lbl">启用 Vibe</div>
@@ -9817,15 +9921,6 @@ function renderImgCfg(){
       「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 和 vibe 组导出的 <b>.json</b>（自带编码，用的时候不扣点数；带组名的会自动成组），也认图片（V4 每次编码要扣点数）。
       <b>只对 nai-diffusion-3 / 4 系列生效</b>，V5 或其他后端会自动跳过，不会报错。</div>
 
-    <div class="grouptitle">质量词</div>
-    <div class="group"><div class="field">
-      <textarea id="ig-quality" style="min-height:52px">${esc(g.quality)}</textarea></div></div>
-
-    <div class="grouptitle">负向提示词</div>
-    <div class="group"><div class="field">
-      <textarea id="ig-negative" style="min-height:84px">${esc(g.negative)}</textarea></div></div>
-    <div class="hint">角色可以在「编辑角色」里加自己的固定提示词和额外负向，会和这里合并。</div>
-
     <div class="grouptitle">第二后端　没有人物的图</div>
     <div class="group"><div class="cell static"><div class="lbl">没有人物的图走第二后端</div>
       <label class="switch"><input type="checkbox" ${g2.on?'checked':''}
@@ -9877,10 +9972,13 @@ function renderImgCfg(){
     <div id="diagBox"></div>
     <button class="btn ghost" onclick="testLink()">测试链接</button>
     <button class="btn ghost" onclick="testGen()">试生成一张</button>
-    <button class="btn" onclick="saveImgCfg()">保存</button>
+    <button class="btn" onclick="saveImgCfg()">保存并返回</button>
     <div style="height:20px"></div>`;
+  const body=document.getElementById('imgsetBody');
+  body.oninput=e=>{ if(e.target&&/^ig/.test(e.target.id||'')) imgAutosaveSoon(); };
+  imgAutosave();
 }
-function setImg(k,v){ draftImg[k]=v; readImgForm(); draftImg[k]=v; renderImgCfg(); }
+function setImg(k,v){ readImgForm(); draftImg[k]=v; renderImgCfg(); }
 function readImgForm(){
   const v=id=>{const e=document.getElementById(id); return e?e.value:null;};
   const g=draftImg;
@@ -9890,7 +9988,9 @@ function readImgForm(){
     g.w=parseInt(v('ig-w'))||832; g.h=parseInt(v('ig-h'))||1216;
     g.steps=parseInt(v('ig-steps'))||28; g.cfg=parseFloat(v('ig-cfg'))||5;
     if(v('ig-sampler')!==null) g.sampler=v('ig-sampler').trim();
-    g.quality=v('ig-quality'); g.negative=v('ig-negative');
+    g.quality=v('ig-quality');
+    if(v('ig-negative')!==null){ const nn=(g.negatives||[]).find(x=>x.id===g.activeNegative); if(nn) nn.text=v('ig-negative'); else g.negative=v('ig-negative'); }
+    if(v('ig-noise')!==null) g.noise=v('ig-noise');
     const a=g.artists.find(x=>x.id===g.activeArtist);
     if(a&&v('ig-artist')!==null) a.text=v('ig-artist');
     g.vibes=g.vibes||[]; g.order=g.order||'artist,char,scene,quality';
@@ -10233,7 +10333,7 @@ function buildImgPrompt(scene,char){
 function buildImgNegative(char){
   const g=imgCfg();
   const cn=char&&char.imgNegative?char.imgNegative.trim():'';
-  return [g.negative,cn].map(x=>(x||'').trim()).filter(Boolean).join(', ');
+  return [activeNegText(g),cn].map(x=>(x||'').trim()).filter(Boolean).join(', ');
 }
 
 /* 用聊天接口出图：Gemini 图像模型（nano banana 那类）走 /chat/completions，图夹在回复里 */
@@ -10402,7 +10502,7 @@ async function generateImage(scene,char,opt){
       n_samples:1,ucPreset:0,qualityToggle:false,negative_prompt:negative,
       seed:Math.floor(Math.random()*4294967295),
       dynamic_thresholding:false,controlnet_strength:1,legacy:false,add_original_image:true,
-      cfg_rescale:0,noise_schedule:'karras'};
+      cfg_rescale:0,noise_schedule:g.noise||'karras'};
     if(isV4){
       // V4 系列的正负向要另外用结构化字段再传一次，只给 input/negative_prompt 会 500
       base.use_coords=false;
