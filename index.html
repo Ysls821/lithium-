@@ -3284,7 +3284,7 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - `buildVibeParams` 只看 `activeGroup` 那个组里开着的项，库里的 `on` 不再参与；没有选中组就不带 vibe
 - 老数据没有组的，`vibeGroupsOf` 临时凑：按 `v.group` 名各成一组，散的且开着的凑成「当前」组并设为选中，行为和以前一致；进设置页时 `migrateVibeGroups` 落成正式数据
 - 设置页 Vibe 区分两个标签：「组　生图用这里」（组 chip 一排，选中即生效；组内卡片 + 从库里加 + 改名 / 删组；点卡片调这一组里的强度、信息提取、开关、移出组）和「全部」（仓库：上传、默认值、改名、删除、一键加进当前组）
-- 导入：bundle / vibe 组文件按组名自动成组（同名并进去），单个文件和图片进库并加进当前组（没有组就建「当前」）
+- 导入：bundle / vibe 组文件按组名自动成组（同名并进去），单个文件和图片进库并加进当前组（没有组就建「当前」），导进来的组直接设为当前组
 - 长按菜单同步：改名 / 加进（移出）当前组 / 看图 / 从库里删除；库里删掉会从各组移除
 
 **头像框自动适配**
@@ -9964,7 +9964,8 @@ async function importVibeFiles(inp){
     for(const rec of single) if(!grp.items.some(x=>x.vid===rec.id)) grp.items.push({vid:rec.id,strength:rec.strength,info:rec.info,on:true});
     lastGid=lastGid||grp.id;
   }
-  if(!draftImg.activeGroup&&lastGid) draftImg.activeGroup=lastGid;
+  // 刚导进来的组直接设为当前组：导一个组就是为了用它
+  if(lastGid) draftImg.activeGroup=lastGid;
   vibeTab='group'; vibeSel=null;
   renderImgCfg();
   if(n) toast('加了 '+n+' 个 vibe'+(bad?'，'+bad+' 个没读出来':''));
