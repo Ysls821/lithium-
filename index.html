@@ -3392,10 +3392,24 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - **聊天里图片长按**：看大图 / 重新生成这张照片 / 看这张的提示词和参数 / 下载图片 / 存进 TA 的相册
 - **下载**：iOS Safari 不认 `download`，改成开大图 + 提示「长按图片 → 存储图像」；桌面直接下
 
+### 2026-09-05（二十六）· 「重新生成照片会让角色回应」的真相
+
+用户：点聊天里的「重新生成这张照片」，提示词像是发给了聊天模型，角色当成她的输入开始回应。
+
+在线上把这条链路完整跑了一遍：重生成只做两件事——tags 含中文时单独调一次接口转 tag（不进聊天记录），然后发给生图后端；聊天记录条数不变，`sending` 不动。代码层不会往聊天里塞消息。
+
+最可能的解释：主后端或第二后端选了「聊天接口」但模型填的是**聊天模型**（gemini-2.5-pro 这类）。生图请求打到 `/chat/completions`，聊天模型把「Generate an image: 1boy, …」当成一句话来答，报错提示里带上了它的回答（「模型说：…」），看起来就像角色在回应。
+
+- `chatImage` 先查模型名：不像图像模型（名字里没有 image / imagen / flux / diffusion 这类）直接拦下，说清楚「它只会用文字回答」
+- 出图失败的提示改写：明确「这段文字不是角色在回应你，是生图请求被当成聊天答了」
+- 设置页实时预览里，主 / 第二后端只要是「聊天接口」且模型不像图像模型，红字提醒
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **报错里原样贴模型的话，用户会当成角色说的** → 把上游模型的文本回复放进错误提示时，必须先说明「这不是角色」。同样的文字放在不同位置，含义完全不同。
+- **先在线上复现再下结论** → 这条链路完整跑了一遍，确认代码没往聊天里写东西，才敢说问题在配置。
 - **从子页返回时要重渲染** → `show()` 只是切屏，数据面板不会自己更新。凡是「子页操作会改父页数据」的返回，回调里都要带一次 render。
 - **每一张生成物都要留下完整配方** → 用户要复盘「这张为什么好 / 为什么坏」，靠记忆不行。生成成功的那一刻把提示词、参数、来源、关联消息全存下来，才能重生成、对比。
 - **先改状态再读表单 = 把旧值写进新槽位** → 凡是「表单 → 草稿」的同步，必须在切换选中项**之前**做完。这个 bug 表现成「预设互相污染」，用户描述是「堆积」，查了很久才对上。
@@ -9802,6 +9816,8 @@ function imgPreviewHTML(g){
     <div style="color:var(--sub);margin:8px 0 2px">参数</div><div>${esc(line)}</div>
     <div style="color:var(--sub);margin:8px 0 2px">vibe</div><div>${esc(vline)}</div>
     ${g2.on?`<div style="color:var(--sub);margin:8px 0 2px">第二后端</div><div>${esc((IMG_BACKENDS[g2.backend]||g2.backend)+'　'+(g2.model||'（模型没填）'))}　没有人物的图走这里，只发画面 tag</div>`:''}
+    ${g.backend==='chat'&&g.model&&!looksLikeImageModel(g.model)?`<div style="color:var(--danger);margin-top:8px">主后端的模型「${esc(g.model)}」不像图像模型：生图请求会被它当成聊天来答，出不了图。换成名字里带 image / imagen / flux 的模型。</div>`:''}
+    ${g2.on&&g2.backend==='chat'&&g2.model&&!looksLikeImageModel(g2.model)?`<div style="color:var(--danger);margin-top:8px">第二后端的模型「${esc(g2.model)}」不像图像模型：没有人物的图会被它当成聊天来答，出不了图。</div>`:''}
   </div>`;
 }
 let _pvT=null;
@@ -10433,8 +10449,10 @@ function imgFromChatReply(j){
   if(mm) return mm[0];
   return null;
 }
+const looksLikeImageModel=m=>/image|imagen|banana|dall|flux|diffusion|kontext|seedream|ideogram|midjourney|sdxl|stable/i.test(String(m||''));
 async function chatImage(ep,model,prompt,negative){
   if(!model) throw new Error('模型没填，填一个图像模型（如 gemini-2.5-flash-image）');
+  if(!looksLikeImageModel(model)) throw new Error('「'+model+'」不是图像模型，它只会用文字回答，不会出图。去 设置 → 生图 把这个后端的模型换成图像模型（名字里带 image / imagen / flux 这类）');
   const text='Generate an image: '+prompt+(negative?'\nAvoid: '+negative:'')+'\nReturn only the image, no text.';
   const body={model,messages:[{role:'user',content:text}],stream:false};
   const post=b=>fetch(ep.base+'/chat/completions',{method:'POST',
@@ -10450,8 +10468,8 @@ async function chatImage(ep,model,prompt,negative){
   if(!img){
     const ch=j&&j.choices&&j.choices[0];
     const t=ch&&typeof ch.message?.content==='string'?ch.message.content.slice(0,120):'';
-    throw new Error('回复里没有图片'+(ch&&ch.finish_reason?`（finish_reason: ${ch.finish_reason}）`:'')
-      +(t?`，模型说：${t}`:'')+'。确认模型名是图像模型，且这个中转支持它出图。');
+    throw new Error('这个模型没有出图，只回了文字'+(ch&&ch.finish_reason?`（finish_reason: ${ch.finish_reason}）`:'')
+      +'。这段文字不是角色在回应你，是生图请求被当成聊天答了。确认模型名是图像模型，且这个中转支持它出图。'+(t?`　它回的是：${t.slice(0,60)}`:''));
   }
   return img;
 }
