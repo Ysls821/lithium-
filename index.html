@@ -3252,10 +3252,22 @@ EVE 的原句（解码 0x27e6）就一行：
 - 设置 → 外观美化 → 头像框：显示开关、大小滑块（105% 到 175%，实时预览）、框库网格（点开改名 / 查看 / 删除，删除会把在用的角色清掉）
 - 线上验证时框和头像一样大：`.msg .av img{width:100%}` 这类容器规则的优先级压过了 `.avframe`。框的尺寸 / 定位全部加 `!important`，它本来就不该被任何容器规则改
 
+### 2026-09-05（十六）· 照片对象写歪了也要认出来
+
+用户截图：角色「发照片」时把 `{caption: '…', tags='boy, solo, …', self=true}` 这坨东西当台词发了出来，没有图。模型写的是半吊子 JSON（单引号、等号、没 type），`JSON.parse` 不认，整段就落进了文字通道。
+
+- `imgPartFromText`：先试 JSON，不行就按 `key: 'v'` / `key="v"` / `key=v` 三种写法逐个抠 caption / tags / self
+- `sanitizeParts` 加两步：花括号里带 tags 或 caption 的整块抠成照片；没花括号但同时出现 `tags=` 和 `self=` / `caption=` 的残骸也转成照片，正文清空
+- `normPart`：对象 type 写错或没写、但有 tags 和 caption/self 的，也当照片
+- 提示词加一句：必须严格 JSON、双引号冒号，tags 绝不能当文字发出来
+
+node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带话、无花括号残骸、普通台词不受影响、pov 兜底照旧、type 写错。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **新增结构化输出，第一天就要配兜底** → 贴表情、pov 都是这么栽过来的：提示词写得再清楚，模型也会用单引号、等号、漏 type。每加一种对象类型，`sanitizeParts` 里就要同步加一条「长得像它的文字」的识别，不然坏格式直接变成用户看到的台词。
 - **要改所有调用点时，先想能不能反查** → 头像框需要知道「这是谁的头像」，直接做要改几十处 `avatarHTML(c.avatar)`。头像图本身就是身份，按图反查零改动。副作用（emoji 头像不行）在提示里写明就行。
 - **容器裁切和外溢装饰冲突** → 头像容器全是 `overflow:hidden` 圆角，框要溢出。用 `:has()` 只在有框的容器上放开裁切，头像图改成自己裁，不动没框的地方。
 - **格式靠猜，先拿真文件对** → 前一版按印象写的 bundle 格式只对了内层，外层完全不是那回事。用户手里有真导出物的时候，第一步是要来看结构，而不是写完让她试。
@@ -12311,6 +12323,7 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 # **发照片**
 你可以拍一张照片发给对方，格式：\`{"type":"image","caption":"中文一句话说明这是什么照片","tags":"英文 danbooru tag：画面内容、你此刻的动作表情和穿着、场景、光线，逗号分隔，15 个以内，不要画师名不要质量词","self":true}\`
 - self：照片里有你本人（自拍、镜子里、露出手）填 true；拍的是风景、饭、猫、东西填 false
+- **必须是严格 JSON 对象**：双引号、冒号，不要写成 tags='…' 或 self=true；这个对象不是台词，**绝不能把 tags 当文字发出来**
 - 用在对方要看、剧情里你正在拍东西、或你真想分享的时候；平常聊天不要发
 - **发照片不能代替说话**，数组里还要有正常消息
 - 一轮最多一张`;
@@ -12549,7 +12562,7 @@ function normPart(x){
       return e&&e.length<=8
         ?{type:'react',content:e,mid:pick(x.message_id||x.messageId||x.mid||x.to||'')}:null;
     }
-    if(ty==='image'||ty==='photo'||ty==='picture'){
+    if(ty==='image'||ty==='photo'||ty==='picture'||(x.tags&&(x.caption||x.self!==undefined))){
       const cap=pick(x.caption||x.content||x.text||x.description), tags=pick(x.tags||x.prompt||x.desc);
       if(!cap&&!tags) return null;
       return {type:'image',content:cap||'照片',tags,self:x.self!==false};
@@ -12574,6 +12587,25 @@ function unwrapLine(x){
   if(t.length>1&&/^["'`]/.test(t)&&t[t.length-1]===t[0]) t=t.slice(1,-1).trim();
   return t;
 }
+/* 从一段文字里把照片对象拼回来：先试 JSON，不行就按 key: 'v' / key="v" / key=v 逐个抠 */
+function imgPartFromText(m){
+  const grab=k=>{
+    const r=new RegExp('["\']?'+k+'["\']?\\s*[:=]\\s*(?:"([^"]*)"|\'([^\']*)\'|([^,}\\n]*))','i').exec(m);
+    if(!r) return '';
+    const v=r[1]!=null?r[1]:(r[2]!=null?r[2]:(r[3]||''));
+    return String(v).trim();
+  };
+  let cap='', tags='', self=true;
+  try{
+    const j=JSON.parse(m);
+    cap=String(j.caption||j.content||'').trim(); tags=String(j.tags||j.prompt||'').trim(); self=j.self!==false;
+  }catch(e){
+    cap=grab('caption')||grab('content'); tags=grab('tags')||grab('prompt');
+    const sv=grab('self'); self=!/^(false|0|no)$/i.test(sv||'true');
+  }
+  if(!tags&&!cap) return null;
+  return {type:'image',content:cap||'照片',tags,self};
+}
 function sanitizeParts(parts){
   const out=[];
   // 拆句后条数会膨胀，上限给足——旧值 max+2 会把超出的气泡静默丢掉
@@ -12593,6 +12625,18 @@ function sanitizeParts(parts){
       if(c) out.push({type:'pov',content:c});
       return '';
     });
+    // ①b 正文里混进了照片对象。模型常写成 {caption: '…', tags='…', self=true} 这种半 JSON，
+    //    JSON.parse 不认就会被当成台词发出来——用户看到的是一坨英文 tag
+    t=t.replace(/\{[^{}]*?\b(?:tags|caption)\b[\s\S]*?\}/gi,m=>{
+      const ip=imgPartFromText(m);
+      if(ip){ out.push(ip); return ''; }
+      return m;
+    });
+    // ①c 没有花括号但整段是 caption/tags/self 残骸，同样转成照片，别当话说
+    if(/\btags\s*[:=]/i.test(t)&&/\b(?:self|caption)\s*[:=]/i.test(t)){
+      const ip=imgPartFromText(t);
+      if(ip){ out.push(ip); t=''; }
+    }
     // ② 裸奔的 pov: xxx / 【镜头】xxx 这类残留
     t=t.replace(/^\s*(?:["']?pov["']?\s*[:：]|【?第三视角】?\s*[:：]?|【镜头】\s*)/i,m=>{
       return '';
