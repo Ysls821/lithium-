@@ -3153,10 +3153,22 @@ EVE 的原句（解码 0x27e6）就一行：
 - `chat.bubbleRadius`（4–28，默认 20 = 原来的样子），`applyChatSkin` 写成 `#s-chat` 上的 `--br` / `--br-t`（尾巴那个小角取 min(7, r)）
 - `.bubble` 和 `.msg.me .bubble` 的四个圆角全改成变量；聊天设置里的预览气泡包了一层 `.pvwrap` 挂同样的变量，拖滑块实时变
 
+### 2026-09-05（十一）· 字体下载并行 / 字体名用自己的字体显示 / lithium 配图不再乱塞人
+
+用户三条反馈：加个链接为什么要下载半天；上传很多字体要能随时切换；X 里配图成功了但很难看。
+
+- **下载慢**：CSS 链接里的几十个字体文件原来是一个接一个 `await`，92 个文件 24 秒。改成 6 路并行，同样的字体几秒钟
+- **随时切换**：设置 → 字体 那个列表本来就是字体库，点哪个用哪个。补的是：设置页打开时把所有字体都注册一遍（`warmFonts`），列表里每个名字用它自己的字体显示，不用切过去才知道长什么样
+- **配图难看**的一半原因在自己：lithium 帖子生成配图时一律把角色外貌固定词拼进提示词，「窗外的雨」也会站个人。让模型在帖子 JSON 里带 `self`（图里有没有 TA 本人），没有就不拼角色词；老帖没有这个字段的按描述里有没有 1boy / selfie / portrait 这类词猜（`descHasPerson`）。朋友圈之前已经这么做了，这次对齐
+
+另一半原因是 NovelAI 画无人物场景本来就弱，那是模型的事，要解决得走「按内容分后端」，用户在考虑，还没定。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **顺序 await 一串网络请求** → 几十个小文件串行等于把延迟乘几十倍。凡是互不依赖的下载都要并行，给个并发上限就行。
+- **给「东西」配图别带角色外貌词（第二次）** → 朋友圈修过一次，lithium 那条线漏了。同一类问题要顺着所有调用点过一遍，不能只修报出来的那个入口。
 - **「不联网也能显示」不能靠 `<link>`** → 外链字体每次打开都要请求一次，被墙或断网就退回系统字体。要做到离线可用，必须在添加的那一刻把字体文件抓下来存本地，链接只当来源。
 - **CSS 里的字体文件不是一个** → Google Fonts 中文按 unicode-range 切成几十个 woff2，只抓第一个 url 等于只有几百个字。要按 @font-face 块逐个抓，并把 unicode-range 一起交给 FontFace。
 - **大 Blob 别塞进 settings 记录** → `S` 每次改设置都整条重写，字体几十 MB 放进去每次保存都卡。这类东西开独立的表，`S` 只存 id。
@@ -4442,6 +4454,18 @@ async function registerFont(rec){
   return n;
 }
 let _fontLoaded={};   // id -> 已注册的 face 数
+/* 设置页打开时把没注册的字体都注册上，列表里的名字才能用它自己的字体显示 */
+let _warming=false;
+async function warmFonts(){
+  if(_warming) return;
+  const todo=fonts.filter(f=>_fontLoaded[f.id]===undefined);
+  if(!todo.length) return;
+  _warming=true;
+  try{ for(const f of todo) _fontLoaded[f.id]=await registerFont(f); }
+  finally{ _warming=false; }
+  const sc=document.getElementById('s-settings');
+  if(sc&&sc.classList.contains('active')) renderSettings();
+}
 async function applyFont(){
   const root=document.documentElement;
   const rec=fonts.find(f=>f.id===S.fontId);
@@ -4508,13 +4532,17 @@ async function addFontCss(){
       const list=parseFontFaces(css,u);
       if(!list.length) throw new Error('这个 CSS 里没有 @font-face');
       const cssFamily=list[0].family;
-      const faces=[]; let size=0, fail=0;
-      for(const f of list){
-        try{ const rr=await fetch(f.url); if(!rr.ok) throw new Error(rr.status);
-          const blob=await rr.blob(); size+=blob.size; faces.push({...f,blob}); }
-        catch(e){ fail++; faces.push({...f,blob:null}); }
-        if(faces.length%10===0) toast('下载中 '+faces.length+'/'+list.length);
-      }
+      // 并行 6 路下载：Google Fonts 的中文字体是几十个小文件，串行要半分钟
+      const faces=new Array(list.length); let size=0, fail=0, done=0, idx=0;
+      await Promise.all(Array.from({length:Math.min(6,list.length)},async()=>{
+        while(idx<list.length){
+          const i=idx++, f=list[i];
+          try{ const rr=await fetch(f.url); if(!rr.ok) throw new Error(rr.status);
+            const blob=await rr.blob(); size+=blob.size; faces[i]={...f,blob}; }
+          catch(e){ fail++; faces[i]={...f,blob:null}; }
+          done++; if(done%10===0) toast('下载中 '+done+'/'+list.length);
+        }
+      }));
       const cached=faces.filter(f=>f.blob).length;
       const nm=u.match(/family=([^&:]+)/i);
       const name=nm?decodeURIComponent(nm[1]).replace(/\+/g,' '):(cssFamily||'网络字体');
@@ -6020,7 +6048,7 @@ function renderSettings(){
     <div class="hint">影响全站的按钮、链接、气泡、开关。换了立刻生效，保存后记住。<br>
       每个角色的气泡颜色可以在「聊天设置」里单独覆盖。</div>
 
-    <div class="grouptitle">字体</div>
+    <div class="grouptitle">字体</div>${(warmFonts(),'')}
     <div class="group">
       <div class="cell" onclick="useFont('')"><div class="lbl">系统默认</div><div class="val">${!S.fontId?'使用中':''}</div></div>
       ${fonts.map(f=>`<div class="cell" onclick="useFont('${f.id}')">
@@ -11213,7 +11241,8 @@ ${first
   "following": 关注数,
   "posts": [
     {"text":"帖子正文，10-60字","time":"2小时前","likes":数字,"replies":数字,
-     "private":false,"imgDesc":"如果这条配图，写英文 danbooru tag 描述这张图；纯文字帖就留空字符串"}
+     "private":false,"imgDesc":"如果这条配图，写英文 danbooru tag 描述这张图；纯文字帖就留空字符串",
+     "self":false}
   ],
   "hideOld": ["要设成私密的旧帖开头10字"],
   "comments": [
@@ -11234,6 +11263,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
 - comments 给 3-5 条**新收到的**，可以评在旧帖下面（on 写那条帖子的前 10 字）
 - dms 给 1-3 条新的，可以是老对话里那个人又发来了（who 用同一个名字，msgs 只写新增的几句），也可以是新来的人`}
 - 评论和私信的语气要杂——有真心夸的、有油腻的、有催更的、有阴阳怪气的，可以有让人不适的
+- self：这条的图里有你本人（自拍、镜子里、露出手）才 true；画、风景、东西、猫都是 false
 - 昵称要像真实网友，不要"用户A"这种`;
     let t=(await callAPI([{role:'user',content:p}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
@@ -11248,7 +11278,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
     const fresh=(Array.isArray(j.posts)?j.posts:[]).slice(0,first?8:4).map(x=>({
       text:S1(x.text).slice(0,120), time:S1(x.time).slice(0,10), at:liParseTime(x.time,now),
       likes:num(x.likes), replies:num(x.replies), private:!!x.private,
-      imgDesc:S1(x.imgDesc).slice(0,160), img:null, liked:false, comments:[]}))
+      imgDesc:S1(x.imgDesc).slice(0,160), self:!!x.self, img:null, liked:false, comments:[]}))
       .filter(x=>x.text&&!seen.has(x.text)&&seen.add(x.text));
     const posts=[...fresh,...oldPosts].slice(0,60);
     // 把旧帖设成私密（只动旧的，只动公开的）
@@ -11304,7 +11334,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
     if(imgReady()&&imgCfg().autoPost!==false){
       for(const np of fresh){
         if(np.private||!np.imgDesc) continue;
-        try{ np.img=await generateImage(np.imgDesc,c); await dbPut('characters',c); characters=await dbAll('characters'); renderLi(); }
+        try{ np.img=await generateImage(np.imgDesc,liPersonOf(np)?c:null); await dbPut('characters',c); characters=await dbAll('characters'); renderLi(); }
         catch(e){ toast('配图失败：'+e.message); break; }
       }
     }
@@ -11318,11 +11348,14 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
   }catch(e){ if(!silent) toast('失败：'+e.message); return false; }
 }
 
+/* 这张图里有没有 TA 本人：新帖有 self 字段，老帖按描述猜。没有人就不拼角色外貌词，否则风景照里会站个人 */
+const descHasPerson=d=>/\b(1boy|1girl|2boys|2girls|solo|boy|girl|man|woman|male|female|person|people|selfie|self|portrait|face|hands?|body|couple|character|figure)\b/i.test(String(d||''));
+const liPersonOf=p=>typeof p.self==='boolean'?p.self:descHasPerson(p.imgDesc);
 /* 给某条帖子生成配图 */
 function liGenImage(i){
   const c=characters.find(x=>x.id===curCharId), p=c.li.posts[i];
   if(!imgReady()) return toast('先去 设置 → 生图 配一下');
-  openGen({charId:curCharId,scene:p.imgDesc||'',acceptText:'用作这条帖子的配图',
+  openGen({charId:liPersonOf(p)?curCharId:null,scene:p.imgDesc||'',acceptText:'用作这条帖子的配图',
     back:()=>{ show('s-li'); renderLi(); },
     onAccept:async(src)=>{
       const cc=characters.find(x=>x.id===curCharId);
