@@ -1019,6 +1019,7 @@ input[type=range]{accent-color:var(--accent)}
 .vibecard{position:relative;aspect-ratio:1;border-radius:13px;overflow:hidden;background:var(--card);
   box-shadow:var(--shadow-s);cursor:pointer;border:2.5px solid transparent}
 .vibecard.on{border-color:var(--accent)}
+.vibecard.sel{outline:2px solid var(--accent);outline-offset:2px}
 .vibecard img{width:100%;height:100%;object-fit:cover}
 .vibecard .vibeph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
   background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:16px}
@@ -3196,10 +3197,19 @@ EVE 的原句（解码 0x27e6）就一行：
 - 提示词拼法：tags 是画面，角色固定词 + 画师串 + 质量词 + vibe 由 `buildImgPrompt` / `buildVibeParams` 照常拼；`self:false` 的照片不带角色词并走第二后端
 - 生成出来的图 `real:false`，不会当视觉输入喂回模型，模型看到的还是 `[图片：caption]`
 
+### 2026-09-05（十三）· vibe 参数改成面板滑块
+
+用户：「你的 vibe 为啥不让我调参数」。参数其实在长按菜单里，一个个弹窗输数字；手机上长按不好用，等于没有。
+
+- 点卡片展开一个面板（`vibeSel`）：开关、强度滑块、信息提取滑块、改名 / 看图 / 删除 / 收起。滑块 `oninput` 只改数字，`onchange` 才写回并重绘，拖的时候不会被整页重渲染打断
+- 文件来的 vibe 信息提取不是随便调的：编码是按某一档 `information_extracted` 算出来的。`vibeInfoOptions` 把文件里各模型带的档位列出来做成分段选择；`vibeEncFor` 挑编码时取离设置值最近的那档
+- 长按菜单留着，选中的卡片加描边
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **手机上别把功能藏在长按里** → 长按在 iOS 上会和系统菜单打架，用户根本发现不了。可调的参数必须有可见入口，滑块优先于弹窗输数字。
 - **「有没有人」是生图路由的唯一开关** → 主/第二后端、拼不拼角色词、用不用 vibe，全都挂在这一个标记上。凡是产出图片描述的地方（朋友圈、lithium、聊天照片、生成页）都必须把这个标记一起产出来，缺了就只能靠正则猜。
 - **文件里已有的编码别再花钱算一遍** → NAI 的 vibe 文件自带各模型编码，之前一律重新 encode 等于每次多扣点数。外部导出物先看里面有什么，再决定要不要调接口。
 - **后台生成要排队** → 一轮回复可能带照片、朋友圈自动配图也可能同时触发，并发打 NAI 会 429。聊天照片走一个串行队列，朋友圈和 lithium 各自也是一张张来。
@@ -9315,8 +9325,8 @@ const img2Ready=()=>{ const g=img2Cfg(); return !!g.on&&!!imgEndpoint(g).base; }
 const imgReadyFor=char=>char?imgReady():(imgReady()||img2Ready());
 
 let draftImg=null;
-let draftImg2=null;
-function openImgCfg(){ draftImg=imgCfg(); draftImg2=img2Cfg(); renderImgCfg(); show('s-imgset'); }
+let draftImg2=null, vibeSel=null;
+function openImgCfg(){ draftImg=imgCfg(); draftImg2=img2Cfg(); vibeSel=null; renderImgCfg(); show('s-imgset'); }
 function setImg2(k,v){ readImgForm(); draftImg2[k]=v; renderImgCfg(); }
 function renderImgCfg(){
   const g=draftImg, g2=draftImg2||img2Cfg();
@@ -9402,13 +9412,36 @@ function renderImgCfg(){
         return `<span class="chip ${onN===vs.length?'on':''}" onclick="toggleVibeGroup('${esc(gn)}')">${esc(gn)} ${onN}/${vs.length}</span>`;
       }).join('')}</div>`:''; })()}
     <div class="vibegrid">${(g.vibes||[]).map(v=>
-      `<div class="vibecard ${v.on!==false?'on':'off'}" onclick="toggleVibe('${v.id}')"
+      `<div class="vibecard ${v.on!==false?'on':'off'}${vibeSel===v.id?' sel':''}" onclick="if(!guard())vibePick('${v.id}')"
         data-lp="vibeMenu" data-lpid="${v.id}">${v.src?`<img src="${esc(v.src)}" alt="">`:`<div class="vibeph">${esc(String(v.name||'v').slice(0,2))}</div>`}
         ${v.enc?'<span class="vtag">文件</span>':''}
         <span class="vn">${esc(v.name)} ${(+v.strength||0.6).toFixed(1)}</span></div>`).join('')}
       <div class="vibeadd" onclick="addVibe()">${IC('plus',20)}上传</div></div>
+    ${(()=>{ const v=(g.vibes||[]).find(x=>x.id===vibeSel); if(!v) return '';
+      const opts=v.enc?vibeInfoOptions(v):[];
+      return `<div class="group" style="margin-top:2px">
+      <div class="cell static"><div class="lbl">${esc(v.name)}${v.group?` <small style="color:var(--sub)">· ${esc(v.group)}</small>`:''}</div>
+        <label class="switch"><input type="checkbox" ${v.on!==false?'checked':''}
+          onchange="vibeSet('${v.id}','on',this.checked)"><i></i></label></div>
+      <div class="field"><label>强度　<b id="vs-str">${(+v.strength||0.6).toFixed(2)}</b>　越大越像参考图</label>
+        <input type="range" min="0.05" max="1" step="0.05" value="${+v.strength||0.6}"
+          oninput="document.getElementById('vs-str').textContent=(+this.value).toFixed(2)"
+          onchange="vibeSet('${v.id}','strength',parseFloat(this.value))"></div>
+      ${opts.length?`<div class="field"><label>信息提取　文件里带了这几档</label>
+        <div class="seg">${opts.map(x=>`<div class="${Math.abs((+v.info||1)-x)<0.005?'on':''}" onclick="vibeSet('${v.id}','info',${x})">${x}</div>`).join('')}</div></div>`
+      :`<div class="field"><label>信息提取　<b id="vs-info">${(+v.info||1).toFixed(2)}</b>　越大越抓细节</label>
+        <input type="range" min="0.05" max="1" step="0.05" value="${+v.info||1}"
+          oninput="document.getElementById('vs-info').textContent=(+this.value).toFixed(2)"
+          onchange="vibeSet('${v.id}','info',parseFloat(this.value))"></div>`}
+      <div class="inline" style="padding:4px 0 6px;gap:8px">
+        <button class="mini" onclick="vibeRename('${v.id}')">改名</button>
+        ${v.src?`<button class="mini" onclick="openViewer(draftImg.vibes.find(x=>x.id==='${v.id}').src)">看图</button>`:''}
+        <button class="mini" style="color:var(--danger)" onclick="vibeDel('${v.id}')">删除</button>
+        <span style="flex:1"></span>
+        <button class="mini" onclick="vibeSel=null;renderImgCfg()">收起</button></div>
+      </div>`; })()}
     <div class="hint">「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 文件（自带编码，用的时候不扣点数；bundle 会按文件名成一组，点上面的组名整组开关），也认图片（V4 每次编码要扣点数）。<br>
-      点卡片开关，长按改名字 / 调强度 / 删除。<br>
+      点卡片展开面板调强度 / 信息提取 / 开关，长按也有菜单。<br>
       <b>只对 nai-diffusion-3 / 4 系列生效</b>，V5 或其他后端会自动跳过，不会报错。
       V4 系列需要反代提供 <code>/ai/encode-vibe</code> 端点，没有的话本次生成会自动不带 vibe。</div>
 
@@ -9609,6 +9642,33 @@ function toggleVibe(id){
   const v=draftImg.vibes.find(x=>x.id===id);
   v.on=v.on===false; renderImgCfg();
 }
+function vibePick(id){ readImgForm(); vibeSel=(vibeSel===id?null:id); renderImgCfg(); }
+function vibeSet(id,k,val){
+  readImgForm();
+  const v=(draftImg.vibes||[]).find(x=>x.id===id); if(!v) return;
+  if(k==='strength'||k==='info') val=Math.max(0.05,Math.min(1,+val||0));
+  v[k]=val; renderImgCfg();
+}
+function vibeRename(id){
+  readImgForm();
+  const v=draftImg.vibes.find(x=>x.id===id); if(!v) return;
+  const n=prompt('名字：',v.name); if(n&&n.trim()){ v.name=n.trim().slice(0,14); renderImgCfg(); }
+}
+function vibeDel(id){
+  readImgForm();
+  if(!confirm('删除这个 vibe？')) return;
+  draftImg.vibes=draftImg.vibes.filter(x=>x.id!==id); if(vibeSel===id) vibeSel=null; renderImgCfg();
+}
+/* 文件里各模型编码自带的信息提取档位（同一个 vibe 可能存了好几档） */
+function vibeInfoOptions(v){
+  const out=new Set();
+  for(const b of Object.values(v.enc||{})){
+    if(!b||typeof b!=='object') continue;
+    const entries=b.encoding?[b]:Object.values(b);
+    for(const e of entries){ const x=e&&e.params&&+e.params.information_extracted; if(Number.isFinite(x)&&x>0) out.add(Math.round(x*100)/100); }
+  }
+  return [...out].sort((a,b)=>a-b);
+}
 function vibeMenu(id){
   const v=draftImg.vibes.find(x=>x.id===id);
   actionSheet(v.name,[
@@ -9771,7 +9831,11 @@ function vibeEncFor(v,model){
   let e=null;
   if(typeof bucket==='string') e=bucket;
   else if(bucket&&typeof bucket==='object'){
-    const first=bucket.encoding?bucket:Object.values(bucket)[0];
+    const entries=bucket.encoding?[bucket]:Object.values(bucket).filter(Boolean);
+    // 同一模型可能存了几档信息提取，取离设置值最近的那档
+    const want=+v.info||1;
+    entries.sort((a,b)=>Math.abs((+(a.params&&a.params.information_extracted)||1)-want)-Math.abs((+(b.params&&b.params.information_extracted)||1)-want));
+    const first=entries[0];
     e=first&&(typeof first==='string'?first:first.encoding);
   }
   return typeof e==='string'&&e.length>20?e:null;
