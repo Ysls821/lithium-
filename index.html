@@ -3295,10 +3295,22 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - 老框没有 fit 的启动时补一次（`warmFrames`）
 - 中心落在图案上（开口框、文字框）时用最近元素的距离，效果一样
 
+### 2026-09-05（十九）· NovelAI 400 Validation error：vibe 参数写法自动换
+
+用户：聊天里角色发图，占位卡上报「400 Validation error: error val…」，点重试还是它。「测试链接」那次是 512×512 不带 vibe 过的；真生成用的是她的尺寸 + vibe 组（V4.5 文件编码），最可疑的是 V4 系列对 `reference_*` 字段的校验。
+
+- 请求拆成 `base` + vibe 变体：V4 系列先发「全字段 + `normalize_reference_strength_multiple:true`」，400 就去掉 `reference_information_extracted_multiple` 再发（V4 的信息提取是编码时定的，接口未必收这个数组），还 400 就不带 vibe 发最后一次并提示「vibe 被拒绝，这张没带」
+- 哪种写法成功了记到 `S.img.v4VibeMode`，下次直接用那种，不再多打一次
+- 报错正文从 120 字放到 600 字，`meta.genErr` 也存 600；点失败占位卡先弹出完整报错再问要不要重试。这样下次能看到 Validation error 后面到底说哪个字段
+
+没有她的 token 无法在这边复现，这是按最可能的原因做的自适应；如果三种写法都 400，占位卡上的完整报错会指出字段名。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **报错只截 120 字等于没报** → 「Validation error: error val…」后面才是字段名，截掉就只剩猜。接口原文至少留 500 字，展示的地方放不下就存起来点开看。
+- **参数写法拿不准就做成可退让的** → 第三方接口的校验规则文档不全时，与其赌一种写法，不如按可能性排好几种，400 就退到下一种，成功的记住。代价是最多多一两次请求，换来不用等用户回报。
 - **「参考哪些」和「有哪些」要分开存** → vibe 的 on/off 挂在库项上，等于全局只有一套开关，换场景就得一个个点。参考集合应该是独立对象（组），库只管存。
 - **固定倍率套不住任意素材** → 装饰性叠图（框、挂件）来源五花八门，留白比例没有标准。要测量素材本身的有效区域（内圈半径）再算倍率，把「适配」做成数据而不是常数。
 - **让聊天模型顺手写生图 tag 是在给它加戏** → 聊天回合里模型正忙着扮演角色，让它同时输出一段英文 tag，格式和质量都容易崩。拆成两步：回合里只写它擅长的中文描述，tag 转换单独一次调用，还能把角色固定词喂进去去重。
@@ -10286,29 +10298,49 @@ async function generateImage(scene,char,opt){
   if(g.backend==='novelai'){
     const vibe=await buildVibeParams(g);
     const isV4=/nai-diffusion-4/.test(g.model);
-    const params={
+    const base={
       params_version:3,width:g.w,height:g.h,scale:g.cfg,sampler:g.sampler,steps:g.steps,
       n_samples:1,ucPreset:0,qualityToggle:false,negative_prompt:negative,
       seed:Math.floor(Math.random()*4294967295),
       dynamic_thresholding:false,controlnet_strength:1,legacy:false,add_original_image:true,
-      cfg_rescale:0,noise_schedule:'karras',...(vibe||{})};
+      cfg_rescale:0,noise_schedule:'karras'};
     if(isV4){
       // V4 系列的正负向要另外用结构化字段再传一次，只给 input/negative_prompt 会 500
-      params.use_coords=false;
-      params.legacy_v3_extend=false;
-      params.skip_cfg_above_sigma=null;
-      params.v4_prompt={caption:{base_caption:prompt,char_captions:[]},use_coords:false,use_order:true};
-      params.v4_negative_prompt={caption:{base_caption:negative,char_captions:[]},legacy_uc:false};
-    }else{ params.sm=false; params.sm_dyn=false; }
-    const r=await fetch(g.base.replace(/\/+$/,'')+'/ai/generate-image',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+g.key},
-      body:JSON.stringify({input:prompt,model:g.model,action:'generate',parameters:params})});
-    if(!r.ok){
-      let d=''; try{ d=(await r.text()).slice(0,120); }catch(e){}
-      throw new Error(`${r.status} ${d}`.trim());
+      base.use_coords=false;
+      base.legacy_v3_extend=false;
+      base.skip_cfg_above_sigma=null;
+      base.v4_prompt={caption:{base_caption:prompt,char_captions:[]},use_coords:false,use_order:true};
+      base.v4_negative_prompt={caption:{base_caption:negative,char_captions:[]},legacy_uc:false};
+    }else{ base.sm=false; base.sm_dyn=false; }
+    // vibe 的参数写法：V4 系列接口校验很严，一种写法 400 就换下一种，最后不带 vibe 再试一次。
+    // 哪种成功了记下来（S.img.v4VibeMode），下次直接用
+    const variants=[];
+    if(vibe){
+      const full={...vibe,...(isV4?{normalize_reference_strength_multiple:true}:{})};
+      if(isV4){
+        const noInfo={...full}; delete noInfo.reference_information_extracted_multiple;
+        if((S.img||{}).v4VibeMode==='noinfo') variants.push(noInfo,full); else variants.push(full,noInfo);
+      }else variants.push(full);
     }
-    return await unzipFirstPng(await r.arrayBuffer());
+    variants.push(null);
+    let lastErr='';
+    for(let i=0;i<variants.length;i++){
+      const v=variants[i];
+      const r=await fetch(g.base.replace(/\/+$/,'')+'/ai/generate-image',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+g.key},
+        body:JSON.stringify({input:prompt,model:g.model,action:'generate',parameters:{...base,...(v||{})}})});
+      if(r.ok){
+        if(vibe&&v===null) toast('vibe 参数被 NovelAI 拒绝（400），这张没带 vibe');
+        else if(vibe&&isV4&&i>0){ S.img={...(S.img||{}),v4VibeMode:v.reference_information_extracted_multiple?'full':'noinfo'}; dbPut('settings',S).catch(()=>{}); }
+        return await unzipFirstPng(await r.arrayBuffer());
+      }
+      let d=''; try{ d=(await r.text()).slice(0,600); }catch(e){}
+      lastErr=`${r.status} ${d}`.trim();
+      if(r.status!==400||v===null||i===variants.length-1) throw new Error(lastErr);
+      console.warn('NAI 400，换一种 vibe 写法重试：',lastErr);
+    }
+    throw new Error(lastErr||'生成失败');
   }
 
   if(g.backend==='a1111'){
@@ -12700,7 +12732,7 @@ async function runGenQ(){
       try{ src=await generateImage(tags,person?c:null); }catch(e){ err=String(e&&e.message||e); }
       const m2=await dbGet('messages',id); if(!m2) continue;
       m2.meta={...m2.meta,pending:false,tags};
-      if(src){ m2.meta.src=src; delete m2.meta.genErr; } else m2.meta.genErr=err.slice(0,80);
+      if(src){ m2.meta.src=src; delete m2.meta.genErr; } else m2.meta.genErr=err.slice(0,600);
       await dbPut('messages',m2);
       if(src) await addCharPhoto(c.id,src,m2.content||'',
         'chat');
@@ -12711,7 +12743,8 @@ async function runGenQ(){
   _genBusy=false;
 }
 async function retryChatImage(id){
-  const m=await dbGet('messages',id); if(!m||!m.meta||!m.meta.tags) return;
+  const m=await dbGet('messages',id); if(!m||!m.meta||!(m.meta.tags||m.meta.desc)) return;
+  if(m.meta.genErr&&!confirm('上次失败：'+m.meta.genErr+'\n\n再试一次？')) return;
   m.meta.pending=true; await dbPut('messages',m); await renderChat(); genChatImage(id);
 }
 /* 片段 -> 消息记录；表情包按描述去库里找图 */
