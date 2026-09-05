@@ -470,7 +470,7 @@ body{background:#0A0A0C;color:var(--text);
   user-select:none;-webkit-user-select:none;position:relative}
 @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
 .msg.me{flex-direction:row-reverse}
-.msg .av{width:34px;height:34px;border-radius:var(--av-r,50%);flex:0 0 auto;overflow:hidden;background:var(--grad);
+.msg .av{width:var(--av-s,34px);height:var(--av-s,34px);border-radius:var(--av-r,50%);flex:0 0 auto;overflow:hidden;background:var(--grad);
   display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff}
 .msg .av img{width:100%;height:100%;object-fit:cover}
 .bubble{max-width:73%;padding:9px 14px;border-radius:var(--br,20px);font-size:15.5px;line-height:1.45;
@@ -3462,6 +3462,10 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - **字体**：列表项点进 `s-fontdetail` 详情页：用这个字体渲染的预览段、可改的名字、类型 / 来源链接或「本地上传的文件」/ 大小 / 缓存了几个文件 / 状态；按钮：使用 / 停用、复制原链接、删除。列表项右侧留一个「用」快捷键，删除挪进详情页
 - **相册**（TA 的手机 → 相册）：从 actionSheet 换成 `s-album` 三列网格，来源角标（TA 发给你的 / 朋友圈 / lithium / 角色图片 / 你发的），★ 表示 TA 点亮过；点开 `s-photo`：大图、来源时间、当时的说明、「替 TA 点亮 / 取消」、「看参数和当时的描述」（按图内容去生图记录里找，打开详情页）、下载、删除（lithium 配图提示去帖子里删）。`characters.photos[i].fav` 存点亮
 
+### 2026-09-05（三十一）· 聊天头像大小
+
+用户要在聊天设置里调头像大小。`chat.avatarSize`（24–56px，默认 34），`applyChatSkin` 写成 `#s-chat` 的 `--av-s`，`.msg .av` 宽高改用它；头像框按百分比算，跟着一起缩。放在「头像形状」下面，每个角色独立。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -3706,7 +3710,7 @@ const DEFAULT_CHAT={
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   memCore:0, memEpisodic:0, memEvery:0,      // 0=跟随全局
   xdmEnabled:false, xdmRate:15, xdmHours:6,
-  avatarRadius:50, bubbleRadius:20, textMe:'', textTa:'', charImg:true,
+  avatarRadius:50, avatarSize:34, bubbleRadius:20, textMe:'', textTa:'', charImg:true,
   proEnabled:false, proMinutes:60, proDaily:5,
   sceneMode:'online',         // online=隔着手机  offline=面对面
   styleExamples:''            // 角色专属风格示例，空=用全局的
@@ -7035,6 +7039,8 @@ function applyChatSkin(cfg){
   if(!el) return;
   const r=Number.isFinite(+cfg.avatarRadius)?+cfg.avatarRadius:50;
   el.style.setProperty('--av-r',r+'%');
+  const as=Number.isFinite(+cfg.avatarSize)?+cfg.avatarSize:34;
+  el.style.setProperty('--av-s',as+'px');
   const br=Number.isFinite(+cfg.bubbleRadius)?+cfg.bubbleRadius:20;
   el.style.setProperty('--br',br+'px'); el.style.setProperty('--br-t',Math.min(7,br)+'px');
   el.style.setProperty('--tx-me',cfg.textMe||'');
@@ -7470,6 +7476,15 @@ function renderChatSet(){
         <span style="width:52px;text-align:right;color:var(--sub)">${g.avatarRadius==50?'圆形':g.avatarRadius+'%'}</span></div>
     </div></div>
     <div class="hint">左边是方形，右边是圆形，中间是圆角方形。</div>
+
+    <div class="grouptitle">头像大小</div>
+    <div class="group"><div class="field">
+      <div class="inline"><input type="range" min="24" max="56" step="2" value="${Number.isFinite(+g.avatarSize)?+g.avatarSize:34}"
+        oninput="setCfg('avatarSize',parseInt(this.value),true);applyChatSkin({...draftCfg});
+          this.nextElementSibling.textContent=this.value+'px'" style="flex:1">
+        <span style="width:44px;text-align:right;color:var(--sub)">${Number.isFinite(+g.avatarSize)?+g.avatarSize:34}px</span></div>
+    </div></div>
+    <div class="hint">聊天里两边头像一起变，头像框跟着缩放。默认 34px。</div>
 
     <div class="grouptitle">气泡圆角</div>
     <div class="group"><div class="field">
