@@ -7,7 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="小手机">
-<link rel="manifest" href='data:application/manifest+json,{"name":"%E5%B0%8F%E6%89%8B%E6%9C%BA","short_name":"%E5%B0%8F%E6%89%8B%E6%9C%BA","start_url":".","scope":".","display":"standalone","orientation":"portrait","background_color":"%230A0A0C","theme_color":"%230A0A0C"}'>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>小手机</title>
 <style>
@@ -88,6 +90,11 @@ body{background:#0A0A0C;color:var(--text);
   padding:8px 10px;cursor:pointer;position:relative;z-index:2;border-radius:10px;transition:opacity .15s}
 .navbar button:active{opacity:.45}
 .navbar .sp{flex:1}
+/* 添加到主屏幕后是独立窗口，系统自己的状态栏会压在顶上：假状态栏只留安全区高度、不画内容，免得两个时间叠在一起 */
+@media (display-mode:standalone){
+  #statusbar{height:env(safe-area-inset-top,0px);min-height:0;padding:0}
+  #statusbar>*{display:none}
+}
 .navbar .lead{display:flex;align-items:center;gap:2px}
 /* 全局界面字号：每个屏幕整体缩放（zoom 会连布局一起缩，百分比宽度照样填满，不会横向溢出） */
 .screen,#sheet,#viewer,#toast{zoom:var(--ui-zoom,1)}
@@ -3421,10 +3428,25 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - **全局界面字号**：设置 → 外观美化 → 字体 → 「界面字号」85%–130%。做法是 `.screen, #sheet, #viewer, #toast { zoom: var(--ui-zoom) }`——先在线上试了三种：`#phone` 整体 zoom 会把百分比高度算乱，`html` 改 font-size 对 px 单位没用，给每个 `.screen` 加 zoom 最干净：布局跟着一起缩，百分比宽度照样填满，不横向溢出，机身框不动。聊天气泡字号仍在聊天设置里单独调
 - **清理**：删掉「键盘诊断」入口和 `kbDiag`、「底色排查」（红色底色探针 `toggleBgProbe`）、聊天设置里的「聊天页极简（排查用）」和 `chatBare`。这些是 8 月底修键盘缝隙时的排查工具，问题早修完了。保留「键盘适配」三档，那个是功能
 
+### 2026-09-05（二十九）· 做成「客户端」：PWA 补齐图标、manifest 文件、离线缓存
+
+用户问怎么做成客户端 app。单文件网页最合适的路是 PWA（添加到主屏幕），原生打包（Capacitor + Xcode + 开发者账号）对个人用不值。页面本来就有 standalone 的 meta 和一个 data URL 的 manifest，缺三样：
+
+- **图标**：之前一张都没有，iOS 加到主屏幕是网页截图。用 PIL 生成占位图标（薰衣草渐变圆角方块 + 白色「照」）：`icon-192.png`、`icon-512.png`、`icon-maskable-512.png`（留 10% 安全边）、`apple-touch-icon.png`（180，不透明底，iOS 自己切圆角）。用户以后用生图软件出的图直接覆盖这几个文件
+- **manifest 改成真文件** `manifest.webmanifest`（data URL 的 manifest 里放不了图标路径），`start_url` / `scope` 都是 `./`
+- **service worker** `sw.js`：同源 GET 网络优先、失败用缓存，接口请求一律不碰；导航请求断网时退回缓存的 index。这样更新永远立刻生效，只有断网才用旧的。只在 http(s) 下注册
+- **独立窗口下的假状态栏**：`display-mode: standalone` 时系统自己的状态栏压在顶上，假状态栏只留 `env(safe-area-inset-top)` 的高度、内容不画，免得两个时间叠在一起
+
+部署注意：Pages 仓库现在除了 index.html 还有这 6 个文件，`同步` 时别只拷 index.html。
+
+**数据的坑**：iOS 上「添加到主屏幕」的 app 和 Safari 是两套存储，Safari 里的聊天记录不会自动出现在 app 里，要先在 Safari 里「导出全部数据」再到 app 里导入。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **PWA 缺图标等于没做** → 没有 192 / 512 图标，Android 不给安装提示，iOS 用截图当图标。manifest 里的图标必须是真文件路径，data URL 的 manifest 放不了。
+- **独立窗口和浏览器里的状态栏不一样** → 假状态栏在浏览器里是装饰，在 standalone 里会和真的叠在一起。按 display-mode 分开处理。
 - **绝对定位的标题要显式垂直居中** → 只给 left/right 不给 top，元素停在文档流位置（顶边），副标题空着还占位，看起来就是「浮起来」。
 - **排查工具修完问题要撤** → 诊断入口留在设置页里，用户会以为那是功能，也会误点。修完就删，日志里有记录就够。
 - **不同类型的消息共用一个菜单，等于每种都塞满不相干的项** → 消息类型一多，菜单按类型分支，每支只放该类型说得通的操作。
@@ -13760,6 +13782,9 @@ async function ensurePersona(){
   const saved=await dbGet('settings','global');
   S=saved?{...DEFAULT_SETTINGS,...saved}:{...DEFAULT_SETTINGS};
   applyTheme(S.accent); applyFrameScale(); applyUiScale();
+  if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)&&!/^file:/.test(location.href)){
+    navigator.serviceWorker.register('./sw.js').catch(e=>console.warn('sw 注册失败',e));
+  }
   await loadAll();
   try{ await applyFont(); }catch(e){ console.warn('字体应用失败',e); }
   warmFrames().catch(()=>{});
