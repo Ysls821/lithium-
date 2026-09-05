@@ -628,6 +628,11 @@ body{background:#0A0A0C;color:var(--text);
 .mm .mt2{font-size:14.5px;line-height:1.6;margin:4px 0 6px;white-space:pre-wrap}
 .mm .mimg{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px}
 .mm .mimg img{width:78px;height:78px;object-fit:cover;border-radius:7px;cursor:pointer}
+.mm .mlock{width:164px;aspect-ratio:1.3;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:4px;padding:8px;margin-bottom:6px;border-radius:7px;color:var(--sub);font-size:11px;line-height:1.35;
+  text-align:center;cursor:pointer;
+  background:repeating-linear-gradient(45deg,rgba(122,104,240,.07) 0 10px,rgba(122,104,240,.03) 10px 20px)}
+.mm .mlock small{color:var(--sub2);font-size:10.5px}
 .mm .mf{display:flex;align-items:center;gap:12px;font-size:11.5px;color:var(--sub2)}
 .mm .mf b{color:var(--accent);cursor:pointer;font-weight:500}
 .mmcmt{background:var(--bg);border-radius:9px;padding:7px 10px;margin-top:7px;font-size:13px;line-height:1.7}
@@ -3080,10 +3085,33 @@ EVE 的原句（解码 0x27e6）就一行：
 
 **时间跟着走**：以前帖子只存模型写的「2小时前」文字，攒起来之后全是「2小时前」。现在每条帖子/评论/私信都存 `at` 时间戳（把模型写的相对时间按刷新时刻折算），显示时用 `liTime()` 按现在算，旧帖会自然变成「3天前」「8月26日」。老数据没有 `at` 的，`liBackfill()` 用上次刷新时刻做基准补一次。X 的动态流按 `at` 把各账号的帖子真正交错排。
 
+### 2026-09-05（七）· 朋友圈配图 + 不用反代的生图路径
+
+用户：什么时候能接好正常的生图，小照发的朋友圈都没图。
+
+两件事一起做了。
+
+**① 生图多了一条「聊天接口」后端**。原来四种后端里最顺手的 NovelAI 必须自己部署反代（Cloudflare Worker 国内不稳，本地 `nai_proxy.py` 手机用不了，而且页面挂在 GitHub Pages 的 https 上，去连局域网 http 会被浏览器当混合内容拦掉），这一步用户一直没走通。新后端走和聊天一样的 OpenAI 兼容中转 `POST /chat/completions`，模型填图像模型（`gemini-2.5-flash-image`、`gemini-3-pro-image-preview` 这类），图夹在回复里。
+
+- 地址 / Key 留空就用聊天那套（`imgEndpoint()` 统一解析，`imgReady()` 替掉原来三处 `imgCfg().base` 判断）
+- 请求带 `modalities:['image','text']`，中转报 400 就去掉再发一次
+- 回复解析 `imgFromChatReply()` 认四种：`message.images[]`（OpenRouter）、多模态数组 content 里的 `image_url` / `inline_data`、字符串 content 里的 markdown data URL、图片链接
+- 「拉取」在这个后端下只列名字里带 image / imagen / banana / dall / flux 等的模型
+- 诊断 / 试生成 / 拉模型都按实际端点走
+
+**② 朋友圈带图**。`aiPostMoment` 改成让模型输出 `{text, imgDesc, self}`：大多数动态配图（随手拍的饭、景、猫、自拍），`imgDesc` 写照片的英文描述，`self` 标照片里有没有 TA 自己——有才带角色固定词，拍东西和风景不带，免得每张饭照里都站着个人。
+
+- 生图配好且「自动配图」开着（默认开，在 设置 → 生图 里）就发完立刻出图；关着就只带描述
+- 没出图的动态显示一张斜纹占位卡，写着描述，点一下生成；长按动态也有「生成配图 / 换一张配图」
+- lithium 刷新出的新帖同样自动配图（公开的、写了 imgDesc 的），一张一张来，失败就停并提示
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「配好就能用」和「用户真的配得上」是两回事** → NAI 路径代码早就通了，但前提是用户自己部署反代，这一步卡了几个月，等于功能不存在。做接入时要按用户手头实际有的东西（一个聊天中转的地址和 Key）设计最短路径，而不是按最标准的接口。
+- **https 页面连不上局域网 http** → 局域网反代方案在 GitHub Pages 部署下天然不成立，浏览器混合内容拦截。选方案前先对一遍部署形态。
+- **给「东西」配图别带角色外貌词** → 生图提示词一律拼角色固定词，饭照里就会多出个人。凡是画面可能没有角色的场合，要让模型明确说照片里有没有人，再决定拼不拼。
 - **「刷新」被做成「重来」** → lithium 每次刷新让模型重出一整份快照再整体覆盖，用户攒了几周的帖子一按就没。凡是有积累意义的内容（帖子、动态、日记、评论），刷新的语义都必须是「生成新增的那部分叠上去」，整份重生成只允许发生在第一次。
 - **相对时间不能存文字** → 「2小时前」存成字符串，攒起来之后每条都是「2小时前」。要存时间戳，显示时再算；模型给的相对时间在写入那一刻就折算掉。
 - **用户说「照抄 EVE」时不要再自己发明** → 条数这件事连改两版都在自作主张（先钉下限、再推目标），用户要的只是 EVE 那一行。有可参照的原文时，第一步是原样抄过来，效果不对再动。
@@ -3249,7 +3277,7 @@ const DEFAULT_SETTINGS={
   homeBg:'', homeImm:true, mmCover:'', xposts:[], glassMode:'mix', weather:{mode:'',i:.5,chat:false},
   kbMode:'auto',
   oracle:{mode:'watcher',text:''},
-  img:{backend:'novelai',base:'https://image.novelai.net',key:'',model:'nai-diffusion-4-5-full',
+  img:{backend:'novelai',base:'https://image.novelai.net',key:'',model:'nai-diffusion-4-5-full',autoPost:true,
     w:832,h:1216,steps:28,cfg:5,sampler:'k_euler_ancestral',
     order:'artist,char,scene,quality',
     vibeOn:true, vibes:[],
@@ -4840,7 +4868,7 @@ function renderGallery(){
     +`<div class="gadd" onclick="genCharImage()">${IC('sparkle',20)}生成</div>`;
 }
 function genCharImage(){
-  if(!imgCfg().base) return toast('先去 设置 → 生图 配一下');
+  if(!imgReady()) return toast('先去 设置 → 生图 配一下');
   const st=stashChar&&editingCharId!==undefined?null:null;
   openGen({charId:editingCharId,scene:'',acceptText:'加进角色图片',
     back:()=>show('s-charEdit'),
@@ -8587,7 +8615,10 @@ function renderMoments(){
           <div class="mn">${isMe?esc(me.name):esc(mc?mc.name:'？')}</div>
           <div class="mt2">${esc(m.text)}</div>
           ${(m.images||[]).length?`<div class="mimg">${m.images.map((src,i)=>
-            `<img src="${esc(src)}" onclick="openViewer(moments.find(x=>x.id==='${m.id}').images[${i}])">`).join('')}</div>`:''}
+            `<img src="${esc(src)}" onclick="openViewer(moments.find(x=>x.id==='${m.id}').images[${i}])">`).join('')}</div>`
+            :(m.imgDesc?`<div class="mlock" onclick="if(!guard())mmGenImage('${m.id}')">${IC('image',18)}
+              <span>${esc(String(m.imgDesc).slice(0,60))}</span>
+              <small>${imgReady()?'点一下生成这张图':'配好生图后点这里出图'}</small></div>`:'')}
           <div class="mf"><span>${fmtTime(m.timestamp)}</span>
             <b onclick="likeMoment('${m.id}')">${m.liked?'取消赞':'赞'}</b>
             <b onclick="commentMoment('${m.id}')">评论</b></div>
@@ -8655,6 +8686,7 @@ function momentMenu(id){
   const m=moments.find(x=>x.id===id);
   actionSheet('这条动态',[
     {ic:'smile',t:'让 TA 评论',fn:()=>aiCommentMoment(id)},
+    ...(m.author==='char'?[{ic:'sparkle',t:(m.images||[]).length?'换一张配图':'生成配图',fn:()=>mmGenImage(id)}]:[]),
     {ic:'copy',t:'复制',fn:()=>{ navigator.clipboard?.writeText(m.text); toast('已复制'); }},
     {ic:'trash',t:'删除',danger:true,fn:async()=>{
       if(!confirm('删除这条动态？')) return;
@@ -8674,24 +8706,54 @@ async function commentMoment(id){
   await dbPut('moments',m); moments=await dbAll('moments'); renderMoments();
 }
 async function aiPostMoment(){
-  const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
+  const c=characters.find(x=>x.id===curCharId);
   toast('TA 在编辑…');
   try{
     const ms=(await msgsOf(curCharId)).slice(-16);
-    const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const mood=moodOf(curCharId,today(),'char');
     const p=`${storyCtx(c,{msgs:ms,take:16,skip:['social']})}
 
 发一条朋友圈。真实、日常，10-60 字，可以是吐槽、随手一拍的感想、生活碎片。
 **素材从上面的行程和剧情里挑**——今天真做过的事、真发生的心情，
 别发一件今天没发生过的事。
 不要故作深沉，不要写成文案，不要 @ 任何人，不要直接提对方的名字。
-直接输出正文，不要任何格式标记。`;
-    const txt=(await callAPI([{role:'user',content:p}])).trim();
-    await dbPut('moments',{id:uid(),chatId:curCharId,author:'char',text:txt,
+
+朋友圈大多是带图的：随手拍的饭、路上的景、猫、桌面一角、窗外、偶尔一张自拍。
+这条要不要配图你自己定（大多数时候要）。配图就在 imgDesc 里写这张照片的英文描述
+（danbooru tag 或一句英文，像手机随手拍出来的照片，不是插画），不配就留空字符串。
+照片里有你自己（自拍、镜子、露出手）self 填 true；拍的是东西和风景就 false。
+
+只输出 JSON，不要别的：{"text":"正文","imgDesc":"","self":false}`;
+    let t=(await callAPI([{role:'user',content:p}])).trim()
+      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+    const mm=t.match(/\{[\s\S]*\}/);
+    let text=t, imgDesc='', self=false;
+    if(mm){ try{ const j=JSON.parse(mm[0]);
+      text=String(j.text||'').trim()||t; imgDesc=String(j.imgDesc||'').trim().slice(0,200); self=!!j.self; }catch(e){} }
+    const id=uid();
+    await dbPut('moments',{id,chatId:curCharId,author:'char',text,imgDesc,self,
       images:[],comments:[],liked:false,timestamp:Date.now()});
     moments=await dbAll('moments'); renderMoments(); toast('发好了');
+    if(imgDesc&&imgReady()&&imgCfg().autoPost!==false) await mmGenImage(id,true);
   }catch(e){ toast('失败：'+e.message); }
+}
+/* 给一条动态配图：有 imgDesc 就按它画；照片里有 TA 自己才带角色固定词 */
+async function mmGenImage(id,silent){
+  const m=moments.find(x=>x.id===id); if(!m) return;
+  if(!imgReady()) return toast('先去 设置 → 生图 配一下');
+  let desc=String(m.imgDesc||'').trim();
+  if(!desc){
+    const d=prompt('这张图画什么（英文 tag 或一句英文）：','');
+    if(d===null||!d.trim()) return;
+    desc=d.trim().slice(0,200);
+  }
+  if(!silent) toast('配图生成中…');
+  try{
+    const src=await generateImage(desc,m.self?mmCharOf(m):null);
+    const m2=moments.find(x=>x.id===id); if(!m2) return;
+    m2.imgDesc=desc; m2.images=[src];
+    await dbPut('moments',m2); moments=await dbAll('moments'); renderMoments();
+    toast('配图好了');
+  }catch(e){ toast('配图失败：'+e.message); }
 }
 async function aiCommentMoment(id){
   const list=momentsOf(curCharId);
@@ -8946,24 +9008,36 @@ async function evalRelation(){
 /* ============================================================
    生图
    ============================================================ */
-const IMG_BACKENDS={novelai:'NovelAI',a1111:'SD WebUI (A1111)',openai:'OpenAI 兼容',custom:'自定义'};
+const IMG_BACKENDS={chat:'聊天接口',novelai:'NovelAI',a1111:'SD WebUI (A1111)',openai:'OpenAI 兼容',custom:'自定义'};
 const NAI_MODELS=['nai-diffusion-4-5-full','nai-diffusion-4-5-curated','nai-diffusion-4-full',
   'nai-diffusion-4-curated-preview','nai-diffusion-3','nai-diffusion-furry-3'];
 const NAI_SAMPLERS=['k_euler_ancestral','k_euler','k_dpmpp_2s_ancestral','k_dpmpp_2m_sde','k_dpmpp_sde','ddim_v3'];
 const imgCfg=()=>({...DEFAULT_SETTINGS.img,...(S.img||{})});
+/* 生图实际打到哪：「聊天接口」后端地址 / Key 留空就用聊天那套 */
+function imgEndpoint(g){
+  g=g||imgCfg();
+  if(g.backend==='chat') return {base:String(g.base||S.apiBase||'').replace(/\/+$/,''),key:g.key||S.apiKey||''};
+  return {base:String(g.base||'').replace(/\/+$/,''),key:g.key||''};
+}
+const imgReady=()=>!!imgEndpoint().base;
 
 let draftImg=null;
 function openImgCfg(){ draftImg=imgCfg(); renderImgCfg(); show('s-imgset'); }
 function renderImgCfg(){
   const g=draftImg;
-  const isNai=g.backend==='novelai';
+  const isNai=g.backend==='novelai', isChat=g.backend==='chat';
   document.getElementById('imgsetBody').innerHTML=`
     <div class="grouptitle">后端</div>
     <div class="seg" style="margin:0 0 8px">
       ${Object.entries(IMG_BACKENDS).map(([k,v])=>
         `<div class="${g.backend===k?'on':''}" style="font-size:12.5px" onclick="setImg('backend','${k}')">${v}</div>`).join('')}
     </div>
-    <div class="hint">${isNai
+    <div class="hint">${isChat
+      ?'走和聊天一样的 OpenAI 兼容中转：<code>POST {地址}/chat/completions</code>，模型填<b>图像模型</b>'
+       +'（如 <code>gemini-2.5-flash-image</code>、<code>gemini-3-pro-image-preview</code>，点「拉取」会只列出图像模型）。'
+       +'<br>地址和 Key <b>留空就用聊天那套</b>。不用反代，手机上直接能用。画面描述可以写自然语言。'
+       +'<br>下面的宽高 / 步数 / CFG / 采样器对这条路无效。'
+      :isNai
       ?'NovelAI 官方接口<b>不返回 CORS 头</b>，浏览器直连一定被拦，必须填反代地址。'
        +'<br>项目目录里的 <code>novelai-proxy.js</code> 是一份 Cloudflare Worker 反代，'
        +'照里面的说明贴上去部署，3 分钟就能拿到可用地址。'
@@ -8974,9 +9048,9 @@ function renderImgCfg(){
 
     <div class="group">
       <div class="field"><label>接口地址</label>
-        <input id="ig-base" value="${esc(g.base)}" placeholder="${isNai?'https://你的反代':'http://127.0.0.1:7860'}"></div>
+        <input id="ig-base" value="${esc(g.base)}" placeholder="${isChat?'留空 = 用聊天接口地址':(isNai?'https://你的反代':'http://127.0.0.1:7860')}"></div>
       <div class="field"><label>API Key / Token</label>
-        <input id="ig-key" type="password" value="${esc(g.key)}" placeholder="${isNai?'pst-…':'可留空'}"></div>
+        <input id="ig-key" type="password" value="${esc(g.key)}" placeholder="${isChat?'留空 = 用聊天的 Key':(isNai?'pst-…':'可留空')}"></div>
       <div class="field"><label>模型</label>
         <div class="inline"><input id="ig-model" value="${esc(g.model)}">
         <button class="mini" onclick="fetchImgModels()">拉取</button></div></div>
@@ -9042,6 +9116,12 @@ function renderImgCfg(){
     <div class="group"><div class="field">
       <textarea id="ig-negative" style="min-height:84px">${esc(g.negative)}</textarea></div></div>
     <div class="hint">角色可以在「编辑角色」里加自己的固定提示词和额外负向，会和这里合并。</div>
+
+    <div class="grouptitle">自动配图</div>
+    <div class="group"><div class="cell static"><div class="lbl">TA 发朋友圈 / lithium 帖子时自动出图</div>
+      <label class="switch"><input type="checkbox" ${g.autoPost!==false?'checked':''}
+        onchange="setImg('autoPost',this.checked)"><i></i></label></div></div>
+    <div class="hint">关掉的话帖子只带一段画面描述，长按那条动态 / 帖子再手动生成。每张图都是一次生图请求。</div>
 
     <div class="grouptitle">诊断</div>
     <div id="diagBox"></div>
@@ -9170,7 +9250,8 @@ async function fetchImgModels(){
   if(g.backend==='novelai')
     return actionSheet('NovelAI 模型',NAI_MODELS.map(x=>({t:x,cur:g.model===x,
       fn:()=>{ g.model=x; renderImgCfg(); }})));
-  if(!g.base) return toast('先填地址');
+  const ep=imgEndpoint(g);
+  if(!ep.base) return toast(g.backend==='chat'?'聊天接口地址也没填':'先填地址');
   try{
     let list=[];
     if(g.backend==='a1111'){
@@ -9178,10 +9259,14 @@ async function fetchImgModels(){
       if(!r.ok) throw new Error(r.status);
       list=(await r.json()).map(x=>x.model_name||x.title).filter(Boolean);
     }else{
-      const r=await fetch(g.base+'/models',{headers:g.key?{'Authorization':'Bearer '+g.key}:{}});
+      const r=await fetch(ep.base+'/models',{headers:ep.key?{'Authorization':'Bearer '+ep.key}:{}});
       if(!r.ok) throw new Error(r.status);
       const j=await r.json();
       list=(j.data||j.models||[]).map(x=>x.id||x.name).filter(Boolean);
+      if(g.backend==='chat'){
+        const im=list.filter(x=>/image|imagen|banana|dall|flux|diffusion|kontext|seedream|ideogram|midjourney/i.test(x));
+        if(im.length) list=im; else toast('列表里没看到图像模型，全部列出');
+      }
     }
     if(!list.length) throw new Error('没有返回模型');
     actionSheet('选择模型',list.slice(0,80).map(x=>({t:x,cur:g.model===x,
@@ -9217,6 +9302,55 @@ function buildImgNegative(char){
   const g=imgCfg();
   const cn=char&&char.imgNegative?char.imgNegative.trim():'';
   return [g.negative,cn].map(x=>(x||'').trim()).filter(Boolean).join(', ');
+}
+
+/* 用聊天接口出图：Gemini 图像模型（nano banana 那类）走 /chat/completions，图夹在回复里 */
+function imgFromChatReply(j){
+  const m=(j&&j.choices&&j.choices[0]&&j.choices[0].message)||{};
+  const pick=u=>u&&/^(data:image\/|https?:\/\/)/i.test(String(u))?String(u):null;
+  // OpenRouter 风格：message.images[]
+  for(const im of (Array.isArray(m.images)?m.images:[])){
+    const u=pick((im&&im.image_url&&im.image_url.url)||(im&&im.url)||(im&&im.b64_json&&'data:image/png;base64,'+im.b64_json));
+    if(u) return u;
+  }
+  // 多模态数组 content
+  if(Array.isArray(m.content)) for(const part of m.content){
+    if(!part) continue;
+    const inl=part.inline_data||part.inlineData;
+    const u=pick((part.image_url&&part.image_url.url)||part.url||(inl&&inl.data&&`data:${inl.mime_type||inl.mimeType||'image/png'};base64,${inl.data}`));
+    if(u) return u;
+  }
+  // 字符串 content：markdown 里的 data URL 或图片链接
+  const s=typeof m.content==='string'?m.content:'';
+  let mm=s.match(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/i);
+  if(mm) return mm[0].replace(/\s+/g,'');
+  mm=s.match(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/);
+  if(mm) return mm[1];
+  mm=s.match(/https?:\/\/[^\s)"'<>]+\.(?:png|jpe?g|webp|gif)(?:\?[^\s)"'<>]*)?/i);
+  if(mm) return mm[0];
+  return null;
+}
+async function chatImage(ep,model,prompt,negative){
+  if(!model) throw new Error('模型没填，填一个图像模型（如 gemini-2.5-flash-image）');
+  const text='Generate an image: '+prompt+(negative?'\nAvoid: '+negative:'')+'\nReturn only the image, no text.';
+  const body={model,messages:[{role:'user',content:text}],stream:false};
+  const post=b=>fetch(ep.base+'/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+ep.key},body:JSON.stringify(b)});
+  let r=await post({...body,modalities:['image','text']});
+  // 有的中转不认 modalities 字段，去掉再试一次
+  if(r.status===400) r=await post(body);
+  const raw=await r.text();
+  let j=null; try{ j=JSON.parse(raw); }catch(e){}
+  if(!r.ok) throw new Error(`${r.status} ${(j&&j.error&&j.error.message)||raw.slice(0,160)}`.trim());
+  if(j&&j.error&&!j.choices) throw new Error('接口返回了错误：'+(j.error.message||''));
+  const img=imgFromChatReply(j);
+  if(!img){
+    const ch=j&&j.choices&&j.choices[0];
+    const t=ch&&typeof ch.message?.content==='string'?ch.message.content.slice(0,120):'';
+    throw new Error('回复里没有图片'+(ch&&ch.finish_reason?`（finish_reason: ${ch.finish_reason}）`:'')
+      +(t?`，模型说：${t}`:'')+'。确认模型名是图像模型，且这个中转支持它出图。');
+  }
+  return img;
 }
 
 /* 调用生图后端，返回 dataURL */
@@ -9261,8 +9395,11 @@ async function buildVibeParams(g){
 
 async function generateImage(scene,char){
   const g=imgCfg();
-  if(!g.base) throw new Error('还没配生图地址');
+  const ep=imgEndpoint(g);
+  if(!ep.base) throw new Error(g.backend==='chat'?'聊天接口地址也没填':'还没配生图地址');
   const prompt=buildImgPrompt(scene,char), negative=buildImgNegative(char);
+
+  if(g.backend==='chat') return await chatImage(ep,g.model,prompt,negative);
 
   if(g.backend==='novelai'){
     const vibe=await buildVibeParams(g);
@@ -9371,11 +9508,12 @@ async function testLink(){
   renderDiag();
 
   // 1. 地址
-  if(!g.base){ setDiag(0,'bad','没填地址'); return; }
-  if(!/^https?:\/\//.test(g.base)){ setDiag(0,'bad','要以 http:// 或 https:// 开头'); return; }
+  const ep=imgEndpoint(g);
+  if(!ep.base){ setDiag(0,'bad',g.backend==='chat'?'聊天接口地址也没填':'没填地址'); return; }
+  if(!/^https?:\/\//.test(ep.base)){ setDiag(0,'bad','要以 http:// 或 https:// 开头'); return; }
   if(g.backend==='novelai'&&/image\.novelai\.net/.test(g.base))
     setDiag(0,'ok','官方地址（注意跨域）');
-  else setDiag(0,'ok',g.base.replace(/^https?:\/\//,'').slice(0,26));
+  else setDiag(0,'ok',ep.base.replace(/^https?:\/\//,'').slice(0,26));
 
   // 2+3+4：真发一次最小生成
   setDiag(1,'run','请求中…'); setDiag(2,'run',''); setDiag(3,'run','');
@@ -10896,6 +11034,14 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
     await dbPut('characters',c); characters=await dbAll('characters');
     renderLi();
     if(!silent) toast(first?'刷新好了':`新帖 ${fresh.length} · 评论 ${freshC.length} · 私信 ${nd}`+(hid?` · 设私密 ${hid}`:''));
+    // 新帖自动配图（公开的、写了 imgDesc 的），一张一张来，失败就停
+    if(imgReady()&&imgCfg().autoPost!==false){
+      for(const np of fresh){
+        if(np.private||!np.imgDesc) continue;
+        try{ np.img=await generateImage(np.imgDesc,c); await dbPut('characters',c); characters=await dbAll('characters'); renderLi(); }
+        catch(e){ toast('配图失败：'+e.message); break; }
+      }
+    }
     // 新发的那条顺手把评论拉起来，老帖子留着点进去再拉
     if(fresh.length && !(c.li.posts[0].comments||[]).length){
       liPostIdx=0;
@@ -10909,7 +11055,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
 /* 给某条帖子生成配图 */
 function liGenImage(i){
   const c=characters.find(x=>x.id===curCharId), p=c.li.posts[i];
-  if(!imgCfg().base) return toast('先去 设置 → 生图 配一下');
+  if(!imgReady()) return toast('先去 设置 → 生图 配一下');
   openGen({charId:curCharId,scene:p.imgDesc||'',acceptText:'用作这条帖子的配图',
     back:()=>{ show('s-li'); renderLi(); },
     onAccept:async(src)=>{
@@ -11133,7 +11279,7 @@ function uploadWall(){
   pickImage(d=>{ applyWall(d); toast('已更新'); },1400,.82,{ratio:r,title:t});
 }
 function genWall(){
-  if(!imgCfg().base) return toast('先去 设置 → 生图 配一下');
+  if(!imgReady()) return toast('先去 设置 → 生图 配一下');
   openGen({charId:curCharId,scene:'',
     acceptText:draftPhone.sync?'两处都用这张':(wallTarget==='cover'?'用作 lithium 头图':'用作手机壁纸'),
     back:()=>goTo('s-phoneSet',renderPhoneSet),
