@@ -3475,10 +3475,22 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 改法：这种状态给 `#s-chat` 加 `hasbg`，顶栏、输入栏、引用栏、多选栏改实底 `var(--bg)`、去掉毛玻璃，和状态栏一个颜色，图只铺在消息区。沉浸模式不受影响。
 
+### 2026-09-05（三十）· 模型经常只回一条：历史里它自己就是「一轮一句」
+
+用户：模型经常只回一条消息，查原因。
+
+条数规则（EVE 原句）在「聊天方式」里没动，解析层四层兜底也不会把多条合成一条。真正的原因在**历史的拼法**：`toApiMessages` 把角色的每一条气泡各拼成一条 `assistant` 消息，连发五条就是五条 assistant 紧挨着。模型看到的「自己」每一轮都只有一句话，就照着只回一句——提示词说「至少两三条」，历史示范的却是「一条」，示范永远比规则强。中转再把连续同角色消息合并一下，就更看不出分条了。
+
+改法：`toApiMessages` 把连续的角色气泡合成**一条** assistant 消息，内容是 JSON 数组字符串 `["在","怎么了","[图片：刚拍的]"]`——正好是我们要求它输出的格式。模型看到自己上一轮就是一个多元素数组，这一轮才会延续。用户消息保持原样（带 ID、可能带图）。
+
+顺便加了诊断：聊天设置 → 调试 → 「上一次模型原始回复」，弹出原文并复制，显示解析出几条。以后再出现「只回一条」，一眼能分清是模型只给了一个元素，还是解析出了问题。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **示范比规则强** → 提示词里写「至少两三条」，历史里却每轮只有一句，模型一定跟历史走。凡是要模型延续的格式，历史里就得按那个格式呈现，不能只靠一句规则。
+- **「只回一条」先看原文再猜** → 模型原始回复没留下来，就分不清是模型少给还是解析合并。任何「输出不对」的问题，第一步都是把原文留下来。
 - **半透明栏只在「底下是纯色」时好看** → 毛玻璃栏叠在任意图片上，颜色就不受控。有图的场景要么整体沉浸（栏也透明），要么栏改实底，不能停在中间。
 - **「全局一个滑块」和「每个素材自己调」的取舍** → 素材来源不一的东西（框、vibe）一律按个体存参数，全局值只做默认。上一版全局滑块看着省事，用户第一天就要求拆开。
 - **列表项点击 = 立刻生效，是危险的默认** → 字体列表点一下就切换，用户想看详情却被切了字体。列表点击进详情，快捷动作放右侧小按钮。
@@ -7701,6 +7713,8 @@ function renderChatSet(){
     <div class="secband">管理</div>
     <div class="grouptitle">调试</div>
     <div class="group">
+      <div class="cell" onclick="showRawReply()"><div class="lbl">上一次模型原始回复</div>
+        <div class="val">${lastRawReply?('解析出 '+(lastRawReply.n==null?'?':lastRawReply.n)+' 条'):'还没有'}</div>${CHEV}</div>
       <div class="cell static"><div class="lbl">显示注入管理器</div>
         <label class="switch"><input type="checkbox" ${g.showInject?'checked':''}
           onchange="setCfg('showInject',this.checked,true);updateInjectPill()"><i></i></label></div>
@@ -13170,6 +13184,23 @@ function historyFor(c,ms){
 /* 历史 -> API messages；最近的真图用多模态格式带上，让模型真的看到 */
 const VISION_LOOKBACK=6, VISION_MAX=3;
 function toApiMessages(history){
+  const raw=toApiMessagesRaw(history);
+  // 角色连发的几条气泡在历史里合成一条 assistant 消息、内容是 JSON 数组（["a","b","c"]）。
+  // 以前每条气泡各是一条 assistant 消息，模型看到的「自己」每轮只说一句，就照着只回一条；
+  // 现在它看到自己每轮都是一个多元素数组，才会延续分条的习惯。用户消息保持原样（带 ID、可能带图）。
+  const out=[];
+  for(const m of raw){
+    const last=out[out.length-1];
+    if(m.role==='assistant'&&typeof m.content==='string'){
+      if(last&&last.role==='assistant'&&Array.isArray(last._arr)){ last._arr.push(m.content); last.content=JSON.stringify(last._arr); continue; }
+      out.push({role:'assistant',_arr:[m.content],content:JSON.stringify([m.content])});
+      continue;
+    }
+    out.push(m);
+  }
+  return out.map(({role,content})=>({role,content}));
+}
+function toApiMessagesRaw(history){
   let budget=VISION_MAX;
   const start=Math.max(0,history.length-VISION_LOOKBACK);
   return history.map((m,i)=>{
@@ -13489,6 +13520,14 @@ function splitSentences(t){
   // 太碎的往前粘（比如单独一个"呵。"跟前句合并会更自然？不合并，保持原样）
   return out;
 }
+let lastRawReply=null;   // 上一次模型的原始回复（聊天设置 → 调试 里看），用来分辨「模型只回了一条」还是「解析合并了」
+function showRawReply(){
+  if(!lastRawReply) return toast('这次打开页面后还没收到过回复');
+  const t=lastRawReply.text;
+  const info=`时间 ${fmtTime(lastRawReply.at)}　解析出 ${lastRawReply.n==null?'?':lastRawReply.n} 条　原文 ${t.length} 字`;
+  try{ navigator.clipboard&&navigator.clipboard.writeText(t); }catch(e){}
+  alert('上一次模型原始回复（已复制）\n'+info+'\n\n'+t.slice(0,3000)+(t.length>3000?'\n…（还有 '+(t.length-3000)+' 字）':''));
+}
 function parseReply(text){ return sanitizeParts(parseReplyRaw(text)); }
 function parseReplyRaw(text){
   let t=String(text).trim()
@@ -13687,7 +13726,10 @@ ${regenNote}
   lastFail=null;
   setTyping(true);
   try{
-    const raw=parseReply(await callAPI(payload));
+    const rawText=await callAPI(payload);
+    lastRawReply={at:Date.now(),text:String(rawText),n:null};
+    const raw=parseReply(rawText);
+    lastRawReply.n=raw.length;
     if(!raw.length) throw new Error('没解析出内容');
     /* 镜头逐条化：pov 挂到它前面那条消息上；出现在最前面的给第一条。
        旧格式（整轮一个、放最后）会天然落到最后一条，靠下面的回填铺满全轮 */
