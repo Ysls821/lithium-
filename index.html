@@ -3119,10 +3119,27 @@ EVE 的原句（解码 0x27e6）就一行：
 
 `启动.py` 那条「页面和反代都走局域网 http」的路不推荐了：换了页面地址就换了 IndexedDB 的源，聊天记录全不在。
 
+### 2026-09-05（九）· NovelAI 真正的卡点：zip 解析，不是网络
+
+用户按步骤部署好了 Cloudflare Worker（`naizhao.svy777777.workers.dev`），从她的 Chrome 里实测：反代通、Key 对、NovelAI 出图成功回 200 + 47 万字节 zip，可小手机还是报 `Failed to fetch`。
+
+**根因**：`unzipFirstPng` 只读 zip 的本地文件头拿压缩长度。NovelAI 的 zip 是流式写的（通用标志 bit 3 = data descriptor），本地头里压缩长度是 0，真实长度只在文件尾的中央目录里。于是切出一个空块喂给 `DecompressionStream`，解压流报错——而 Chrome 把 `Response(stream)` 读失败一律抛成 `TypeError: Failed to fetch`，和网络连不上一个措辞。前面几轮全被这句话带偏到跨域上去了。
+
+**改法**：先从文件尾找 EOCD（`50 4b 05 06`）读中央目录，按里面的 method / 压缩长度 / 本地头偏移取数据；没有中央目录再退回扫本地头；两边长度都是 0 就截到下一个签名。挑名字以 `.png` 结尾的条目。解压失败改成能看懂的报错（压缩块字节数 + 条目名），解出来先验 PNG 魔数。
+
+单测（Python 造三种 zip，node 跑）：流式 deflate 老版 TypeError / 新版通过；普通 deflate 两版都过；流式 stored 老版拿到错字节 / 新版通过。
+
+**排查手法记一下**：在用户 Chrome 里把小手机的 `fetch` 临时换成 XHR 重发同一请求，看 readyState / 状态码 / 响应头 / 进度事件——一眼分出「没到」「到了但跨域」「到了但解析炸」。控制台里的 `Failed to fetch` 本身没有信息量。
+
+顺带：测试中途她的 token 被 NAI 回 401 了（几分钟前还能出图），多半是又点了一次「Get Persistent API Token」或账号那边动了，和本次改动无关。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **`Failed to fetch` 不一定是网络** → Chrome 对「请求没发出去」「响应没跨域头」「响应流 / 解压流读到一半炸了」抛的是同一句话。解析层用了 `new Response(stream)` 的地方，异常一定要自己接住换措辞，否则会把人引到网络上白查几轮。
+- **zip 解析只看本地头** → 流式写出的 zip（archiver / Node 流、NAI）本地头长度全是 0，真值在中央目录。凡是自己手写容器格式解析，都要按规范的「权威位置」读，不能只挑最靠前的那份。
+- **用户机器上能复现时，先复现再推理** → 前面靠截图猜了三轮（网络、梯子、Key），接上她的 Chrome 一次请求就定位了。能拿到真实请求 / 响应时，别用推理代替。
 - **「必须反代」说了三次，用户还是没走通** → 每次都停在「给了脚本」，没有一次把「双击它、填这个地址、点测试」写进用户会看到的那个报错框里。方案要放在用户撞墙的那个位置，不是放在项目目录里。
 - **面板里的 `ERR_BLOCKED_BY_CLIENT` 不是产品 bug** → 测试环境有自己的拦截策略，验不了的东西要如实说验不了，不能把沙箱行为当成浏览器行为下结论。
 - **「配好就能用」和「用户真的配得上」是两回事** → NAI 路径代码早就通了，但前提是用户自己部署反代，这一步卡了几个月，等于功能不存在。做接入时要按用户手头实际有的东西（一个聊天中转的地址和 Key）设计最短路径，而不是按最标准的接口。
@@ -9482,27 +9499,71 @@ async function generateImage(scene,char){
   return /^(data:|https?:)/.test(img)?img:'data:image/png;base64,'+img;
 }
 
-/* NovelAI 返回的是 zip，取出第一张 png */
+/* NovelAI 返回的是 zip，取出第一张 png。
+   NAI 的 zip 是流式写的：本地文件头里压缩长度是 0（用了 data descriptor），
+   真实长度只在文件尾的中央目录里。所以先读中央目录，读不到再退回扫本地头。 */
 async function unzipFirstPng(buf){
   const dv=new DataView(buf), u8=new Uint8Array(buf);
-  for(let i=0;i<u8.length-4;i++){
-    if(dv.getUint32(i,true)!==0x04034b50) continue;
-    const method=dv.getUint16(i+8,true);
-    const csize=dv.getUint32(i+18,true);
-    const nlen=dv.getUint16(i+26,true), elen=dv.getUint16(i+28,true);
-    const start=i+30+nlen+elen;
-    let data=u8.slice(start,start+csize);
-    if(method===8){
-      if(typeof DecompressionStream==='undefined') throw new Error('浏览器不支持解压，请换 A1111 后端');
+  const td=new TextDecoder();
+  const entries=[];
+  // 1) 从文件尾找 EOCD（50 4b 05 06），拿中央目录
+  let eocd=-1;
+  for(let i=u8.length-22;i>=Math.max(0,u8.length-22-65557);i--){
+    if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; }
+  }
+  if(eocd>=0){
+    const n=dv.getUint16(eocd+10,true);
+    let p=dv.getUint32(eocd+16,true);
+    for(let k=0;k<n&&p+46<=u8.length;k++){
+      if(dv.getUint32(p,true)!==0x02014b50) break;
+      const nlen=dv.getUint16(p+28,true), elen=dv.getUint16(p+30,true), clen=dv.getUint16(p+32,true);
+      entries.push({method:dv.getUint16(p+10,true), csize:dv.getUint32(p+20,true),
+        off:dv.getUint32(p+42,true), name:td.decode(u8.subarray(p+46,p+46+nlen))});
+      p+=46+nlen+elen+clen;
+    }
+  }
+  // 2) 没有中央目录就扫第一个本地头（老写法）
+  if(!entries.length){
+    for(let i=0;i+30<=u8.length;i++){
+      if(dv.getUint32(i,true)!==0x04034b50) continue;
+      const nlen=dv.getUint16(i+26,true);
+      entries.push({method:dv.getUint16(i+8,true), csize:dv.getUint32(i+18,true),
+        off:i, name:td.decode(u8.subarray(i+30,i+30+nlen))});
+      break;
+    }
+  }
+  if(!entries.length) throw new Error('zip 里没找到图片');
+  const e=entries.find(x=>/\.png$/i.test(x.name))||entries[0];
+  // 数据起点按本地头算（本地头的名字 / 扩展区长度可能和中央目录不同）
+  const lh=e.off;
+  if(lh+30>u8.length||dv.getUint32(lh,true)!==0x04034b50) throw new Error('zip 本地头对不上');
+  const start=lh+30+dv.getUint16(lh+26,true)+dv.getUint16(lh+28,true);
+  let csize=e.csize;
+  if(!csize){
+    // 两边都是 0：截到下一个 data descriptor / 本地头 / 中央目录签名为止
+    let end=u8.length;
+    for(let i=start;i+4<=u8.length;i++){
+      const sig=dv.getUint32(i,true);
+      if(sig===0x08074b50||sig===0x04034b50||sig===0x02014b50){ end=i; break; }
+    }
+    csize=end-start;
+  }
+  let data=u8.slice(start,start+csize);
+  if(e.method===8){
+    if(typeof DecompressionStream==='undefined') throw new Error('浏览器不支持解压，请换别的浏览器');
+    try{
       const ds=new DecompressionStream('deflate-raw');
       const ab=await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer();
       data=new Uint8Array(ab);
-    }else if(method!==0) throw new Error('未知压缩方式 '+method);
-    let bin=''; const CH=0x8000;
-    for(let k=0;k<data.length;k+=CH) bin+=String.fromCharCode.apply(null,data.subarray(k,k+CH));
-    return 'data:image/png;base64,'+btoa(bin);
-  }
-  throw new Error('zip 里没找到图片');
+    }catch(err){
+      // Chrome 把流解压失败也叫 Failed to fetch，换个能看懂的说法
+      throw new Error('zip 解压失败（压缩块 '+csize+' 字节，条目 '+e.name+'）：'+(err&&err.message||err));
+    }
+  }else if(e.method!==0) throw new Error('未知压缩方式 '+e.method);
+  if(!(data[0]===0x89&&data[1]===0x50)) throw new Error('解出来的不是 PNG（前两字节 '+data[0]+' '+data[1]+'）');
+  let bin=''; const CH=0x8000;
+  for(let k=0;k<data.length;k+=CH) bin+=String.fromCharCode.apply(null,data.subarray(k,k+CH));
+  return 'data:image/png;base64,'+btoa(bin);
 }
 
 /* ---------- 连接诊断 ---------- */
