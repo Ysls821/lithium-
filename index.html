@@ -12,6 +12,7 @@
 <title>小手机</title>
 <style>
 :root{
+  --font-stack:-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   --bg:#F2F2F7; --card:#FFFFFF;
   --text:#0B0B0F; --sub:#8A8A8E; --sub2:#B6B6BB;
   --line:rgba(60,60,67,.10); --line2:rgba(60,60,67,.16);
@@ -50,7 +51,7 @@ body{background:var(--bg)!important}
    页面完全涂不到（Via 上就是一条绿带）。保持 height:100%，让键盘盖在页面上，
    缝隙在物理上就不可能出现，再由 initKeyboardFix 把内容顶上去。 */
 body{background:#0A0A0C;color:var(--text);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  font:15px/1.5 var(--font-stack);
   -webkit-font-smoothing:antialiased;display:flex;align-items:center;justify-content:center}
 @media (prefers-color-scheme:light){ body{background:#E7E5EF} }
 
@@ -462,11 +463,11 @@ body{background:#0A0A0C;color:var(--text);
 .msg .av{width:34px;height:34px;border-radius:var(--av-r,50%);flex:0 0 auto;overflow:hidden;background:var(--grad);
   display:flex;align-items:center;justify-content:center;font-size:17px;color:#fff}
 .msg .av img{width:100%;height:100%;object-fit:cover}
-.bubble{max-width:73%;padding:9px 14px;border-radius:20px;font-size:15.5px;line-height:1.45;
+.bubble{max-width:73%;padding:9px 14px;border-radius:var(--br,20px);font-size:15.5px;line-height:1.45;
   background:var(--bubble-ta);color:var(--bubble-ta-text);white-space:pre-wrap;word-break:break-word;
-  box-shadow:var(--shadow-s);border-bottom-left-radius:7px}
-.msg.me .bubble{background:var(--grad);color:#fff;border-bottom-left-radius:20px;
-  border-bottom-right-radius:7px;box-shadow:0 2px 10px rgba(106,86,232,.28)}
+  box-shadow:var(--shadow-s);border-bottom-left-radius:var(--br-t,7px)}
+.msg.me .bubble{background:var(--grad);color:#fff;border-bottom-left-radius:var(--br,20px);
+  border-bottom-right-radius:var(--br-t,7px);box-shadow:0 2px 10px rgba(106,86,232,.28)}
 #s-chat.cta .msg:not(.me) .bubble{color:var(--tx-ta)}
 #s-chat.cme .msg.me .bubble{color:var(--tx-me)}
 .msg{transition:transform .22s cubic-bezier(.32,.72,0,1);touch-action:pan-y}
@@ -806,9 +807,9 @@ input[type=range]{accent-color:var(--accent)}
 .swatch span:active{transform:scale(.9)}
 .previewbox{border-radius:var(--r);padding:14px;margin-bottom:18px;box-shadow:var(--shadow-s);
   display:flex;flex-direction:column;gap:8px}
-.previewbox .pb{max-width:76%;padding:8px 13px;border-radius:19px;font-size:15px;line-height:1.45}
-.previewbox .pb.ta{align-self:flex-start;border-bottom-left-radius:7px}
-.previewbox .pb.me{align-self:flex-end;color:#fff;border-bottom-right-radius:7px}
+.previewbox .pb{max-width:76%;padding:8px 13px;border-radius:var(--br,19px);font-size:15px;line-height:1.45}
+.previewbox .pb.ta{align-self:flex-start;border-bottom-left-radius:var(--br-t,7px)}
+.previewbox .pb.me{align-self:flex-end;color:#fff;border-bottom-right-radius:var(--br-t,7px)}
 
 /* 头像选择 + 图片相册 */
 .avpick{display:flex;flex-direction:column;align-items:center;gap:10px;padding:6px 0 18px}
@@ -1899,7 +1900,7 @@ input[type=range]{accent-color:var(--accent)}
 
 `characters.chat` 是每个角色独立的聊天设置：气泡色、字号、背景、沉浸开关、历史条数、主动发消息、注入管理器开关。
 
-**DB 版本历史**：v1 基础 → v2 加 memories → v3 加 personas → v4 加 stickers/diaries/moods。升级是增量建表，旧数据不动。
+**DB 版本历史**：v1 基础 → v2 加 memories → v3 加 personas → v4 加 stickers/diaries/moods → … → v8 加 fonts（自定义字体 Blob）。升级是增量建表，旧数据不动。
 
 ---
 
@@ -3133,10 +3134,32 @@ EVE 的原句（解码 0x27e6）就一行：
 
 顺带：测试中途她的 token 被 NAI 回 401 了（几分钟前还能出图），多半是又点了一次「Get Persistent API Token」或账号那边动了，和本次改动无关。
 
+### 2026-09-05（十）· 自定义字体 + 气泡圆角
+
+用户：想换字体，文件和 CSS 链接都要支持，挂不挂梯子都得能显示；还要一个气泡边缘放大缩小的设置，放在聊天设置的美化区。
+
+**字体**（设置 → 外观美化 → 字体，全局生效）
+
+- 新建 `fonts` 表（**DB v8**），字体文件直接以 Blob 存 IndexedDB，`S.fontId` 记当前用哪个
+- 「上传字体文件」：ttf / otf / woff / woff2，可多选，导入后自动启用第一个
+- 「添加 CSS 链接 / 字体直链」：贴 Google Fonts 那种 `css2?family=…`、整段 `<link>` 标签、或字体文件直链都认。CSS 链接会拉下来解析 `@font-face`，每块挑一个 url（优先 woff2），保留 font-weight / font-style / unicode-range，**把字体文件全部下载存进本地**——Google Fonts 的中文字体是几十个按 unicode-range 切的小文件，存完以后不联网、不挂梯子照样显示。对方站不允许跨域下载时退回 `<link>` 在线引用并标「需联网」
+- 运行时用 `FontFace(family, arrayBuffer, {weight,style,unicodeRange})` 注册进 `document.fonts`，family 统一用 `uf_<id>`，不和站外名字打架
+- 全站字体改走 `:root{--font-stack}`，`body{font:15px/1.5 var(--font-stack)}`；自定义字体排在系统栈前面，缺字自动回落到系统字体
+- 只注册当前选中的那个，切换时才加载别的；删掉正在用的会回系统默认
+- 字体不进「导出全部数据」（Blob 进不了 JSON），换设备要重新导
+
+**气泡圆角**（聊天设置 → 头像形状下面，每个角色独立）
+
+- `chat.bubbleRadius`（4–28，默认 20 = 原来的样子），`applyChatSkin` 写成 `#s-chat` 上的 `--br` / `--br-t`（尾巴那个小角取 min(7, r)）
+- `.bubble` 和 `.msg.me .bubble` 的四个圆角全改成变量；聊天设置里的预览气泡包了一层 `.pvwrap` 挂同样的变量，拖滑块实时变
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「不联网也能显示」不能靠 `<link>`** → 外链字体每次打开都要请求一次，被墙或断网就退回系统字体。要做到离线可用，必须在添加的那一刻把字体文件抓下来存本地，链接只当来源。
+- **CSS 里的字体文件不是一个** → Google Fonts 中文按 unicode-range 切成几十个 woff2，只抓第一个 url 等于只有几百个字。要按 @font-face 块逐个抓，并把 unicode-range 一起交给 FontFace。
+- **大 Blob 别塞进 settings 记录** → `S` 每次改设置都整条重写，字体几十 MB 放进去每次保存都卡。这类东西开独立的表，`S` 只存 id。
 - **`Failed to fetch` 不一定是网络** → Chrome 对「请求没发出去」「响应没跨域头」「响应流 / 解压流读到一半炸了」抛的是同一句话。解析层用了 `new Response(stream)` 的地方，异常一定要自己接住换措辞，否则会把人引到网络上白查几轮。
 - **zip 解析只看本地头** → 流式写出的 zip（archiver / Node 流、NAI）本地头长度全是 0，真值在中央目录。凡是自己手写容器格式解析，都要按规范的「权威位置」读，不能只挑最靠前的那份。
 - **用户机器上能复现时，先复现再推理** → 前面靠截图猜了三轮（网络、梯子、Key），接上她的 Chrome 一次请求就定位了。能拿到真实请求 / 响应时，别用推理代替。
@@ -3291,7 +3314,7 @@ EVE 的原句（解码 0x27e6）就一行：
    数据全部存在本机浏览器 IndexedDB，不上传任何地方
    ============================================================ */
 
-const DB_NAME='xiaoshouji', DB_VER=7;
+const DB_NAME='xiaoshouji', DB_VER=8;
 let db=null;
 
 const DEFAULT_STYLE=`["在呢", "刚洗完澡", "怎么啦？"]
@@ -3336,7 +3359,7 @@ const DEFAULT_CHAT={
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   memCore:0, memEpisodic:0, memEvery:0,      // 0=跟随全局
   xdmEnabled:false, xdmRate:15, xdmHours:6,
-  avatarRadius:50, textMe:'', textTa:'',
+  avatarRadius:50, bubbleRadius:20, textMe:'', textTa:'',
   proEnabled:false, proMinutes:60, proDaily:5,
   sceneMode:'online',         // online=隔着手机  offline=面对面
   styleExamples:''            // 角色专属风格示例，空=用全局的
@@ -3364,6 +3387,7 @@ function openDB(){
       if(!d.objectStoreNames.contains('moods'))
         d.createObjectStore('moods',{keyPath:'id'}).createIndex('characterId','characterId');
       if(!d.objectStoreNames.contains('moments')) d.createObjectStore('moments',{keyPath:'id'});
+      if(!d.objectStoreNames.contains('fonts')) d.createObjectStore('fonts',{keyPath:'id'});   // v8：自定义字体（存 Blob）
       if(!d.objectStoreNames.contains('presets')) d.createObjectStore('presets',{keyPath:'id'});
       if(!d.objectStoreNames.contains('summaries'))
         d.createObjectStore('summaries',{keyPath:'id'}).createIndex('characterId','characterId');
@@ -4382,6 +4406,130 @@ const hex2rgb=h=>{h=String(h).replace('#','');
   return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];};
 const rgb2hex=a=>'#'+a.map(x=>Math.max(0,Math.min(255,Math.round(x))).toString(16).padStart(2,'0')).join('');
 const mixTo=(h,t,k)=>rgb2hex(hex2rgb(h).map((v,i)=>v+(t[i]-v)*k));
+/* ---------- 字体：文件 / CSS 链接，都缓存进 IndexedDB，之后不联网、不挂梯子也能显示 ---------- */
+let fonts=[];
+const DEFAULT_FONT_STACK='-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+const fmtKB=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';
+/* 把 CSS 里的 @font-face 拆出来：每块取一个 url（优先 woff2），保留字重 / 样式 / unicode-range */
+function parseFontFaces(css,baseUrl){
+  const out=[]; const re=/@font-face\s*\{([^}]*)\}/g; let m;
+  while((m=re.exec(css))){
+    const b=m[1];
+    const g=k=>{ const r=new RegExp(k+'\\s*:\\s*([^;]+)','i').exec(b); return r?r[1].trim():''; };
+    const urls=[...g('src').matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)(?:\s*format\(\s*["']?([^"')]+)["']?\s*\))?/g)]
+      .map(x=>{ try{ return {u:new URL(x[1],baseUrl).href,f:(x[2]||'').toLowerCase()}; }catch(e){ return null; } }).filter(Boolean);
+    if(!urls.length) continue;
+    const pick=urls.find(x=>/woff2/.test(x.f)||/\.woff2(\?|$)/i.test(x.u))
+      ||urls.find(x=>/woff/.test(x.f)||/\.woff(\?|$)/i.test(x.u))||urls[0];
+    out.push({family:g('font-family').replace(/^["']|["']$/g,''),weight:g('font-weight')||'normal',
+      style:g('font-style')||'normal',unicodeRange:g('unicode-range')||'',url:pick.u});
+  }
+  return out;
+}
+/* 把一条字体记录注册进 document.fonts，返回成功的 face 数 */
+async function registerFont(rec){
+  const faces=rec.kind==='file'?[{blob:rec.blob,weight:'normal',style:'normal'}]:(rec.faces||[]);
+  let n=0;
+  for(const f of faces){
+    if(!f.blob) continue;
+    try{
+      const desc={weight:f.weight||'normal',style:f.style||'normal'};
+      if(f.unicodeRange) desc.unicodeRange=f.unicodeRange;
+      const ff=new FontFace(rec.family,await f.blob.arrayBuffer(),desc);
+      await ff.load(); document.fonts.add(ff); n++;
+    }catch(e){ console.warn('字体加载失败',rec.name,e); }
+  }
+  return n;
+}
+let _fontLoaded={};   // id -> 已注册的 face 数
+async function applyFont(){
+  const root=document.documentElement;
+  const rec=fonts.find(f=>f.id===S.fontId);
+  const link=document.getElementById('extFontLink');
+  if(!rec){ root.style.removeProperty('--font-stack'); if(link) link.remove(); return; }
+  if(_fontLoaded[rec.id]===undefined) _fontLoaded[rec.id]=await registerFont(rec);
+  if(_fontLoaded[rec.id]>0){
+    if(link) link.remove();
+    root.style.setProperty('--font-stack',`"${rec.family}",${DEFAULT_FONT_STACK}`);
+  }else if(rec.kind==='css'&&rec.url){
+    // 一个文件都没缓存到：退回在线引用，联网时才显示
+    let l=link;
+    if(!l){ l=document.createElement('link'); l.id='extFontLink'; l.rel='stylesheet'; document.head.appendChild(l); }
+    l.href=rec.url;
+    root.style.setProperty('--font-stack',`"${rec.cssFamily||rec.family}",${DEFAULT_FONT_STACK}`);
+  }else{
+    root.style.removeProperty('--font-stack'); toast('这个字体文件读不出来');
+  }
+}
+async function useFont(id){
+  S.fontId=id||''; await dbPut('settings',S);
+  try{ await applyFont(); }catch(e){ toast('字体应用失败：'+e.message); }
+  renderSettings();
+}
+async function delFont(id){
+  const f=fonts.find(x=>x.id===id); if(!f) return;
+  if(!confirm('删除字体「'+f.name+'」？')) return;
+  await dbDel('fonts',id); fonts=await dbAll('fonts'); delete _fontLoaded[id];
+  if(S.fontId===id){ S.fontId=''; await dbPut('settings',S); await applyFont(); }
+  renderSettings();
+}
+async function importFontFiles(inp){
+  const files=[...(inp.files||[])]; inp.value='';
+  let n=0;
+  for(const file of files){
+    if(!/\.(ttf|otf|woff2?)$/i.test(file.name)){ toast(file.name+'：只认 ttf / otf / woff / woff2'); continue; }
+    const id=uid();
+    await dbPut('fonts',{id,name:file.name.replace(/\.(ttf|otf|woff2?)$/i,''),kind:'file',family:'uf_'+id,
+      blob:file,size:file.size,at:Date.now()});
+    if(!n) S.fontId=id;
+    n++;
+  }
+  if(!n) return;
+  fonts=await dbAll('fonts'); await dbPut('settings',S);
+  try{ await applyFont(); }catch(e){ toast('字体应用失败：'+e.message); }
+  renderSettings(); toast('已导入 '+n+' 个字体，正在使用第一个');
+}
+async function addFontCss(){
+  let u=prompt('粘贴字体的 CSS 链接（Google Fonts 那种 css2?family=…），或字体文件的直链（.ttf / .woff2）。整段 <link …> 标签贴进来也行：','');
+  if(u===null) return; u=u.trim();
+  const mh=u.match(/href\s*=\s*["']([^"']+)["']/i); if(mh) u=mh[1];
+  const mi=u.match(/url\(\s*["']?([^"')]+)["']?\s*\)/i); if(mi) u=mi[1];
+  if(!/^https?:\/\//i.test(u)) return toast('要以 http:// 或 https:// 开头');
+  const id=uid(); toast('下载中…');
+  try{
+    if(/\.(ttf|otf|woff2?)(\?|$)/i.test(u)){
+      const r=await fetch(u); if(!r.ok) throw new Error('HTTP '+r.status);
+      const blob=await r.blob();
+      const name=decodeURIComponent(u.split('/').pop().split('?')[0]).replace(/\.(ttf|otf|woff2?)$/i,'')||'网络字体';
+      await dbPut('fonts',{id,name,kind:'file',family:'uf_'+id,blob,size:blob.size,url:u,at:Date.now()});
+    }else{
+      const r=await fetch(u); if(!r.ok) throw new Error('HTTP '+r.status);
+      const css=await r.text();
+      const list=parseFontFaces(css,u);
+      if(!list.length) throw new Error('这个 CSS 里没有 @font-face');
+      const cssFamily=list[0].family;
+      const faces=[]; let size=0, fail=0;
+      for(const f of list){
+        try{ const rr=await fetch(f.url); if(!rr.ok) throw new Error(rr.status);
+          const blob=await rr.blob(); size+=blob.size; faces.push({...f,blob}); }
+        catch(e){ fail++; faces.push({...f,blob:null}); }
+        if(faces.length%10===0) toast('下载中 '+faces.length+'/'+list.length);
+      }
+      const cached=faces.filter(f=>f.blob).length;
+      const nm=u.match(/family=([^&:]+)/i);
+      const name=nm?decodeURIComponent(nm[1]).replace(/\+/g,' '):(cssFamily||'网络字体');
+      await dbPut('fonts',{id,name,kind:'css',family:'uf_'+id,cssFamily,url:u,faces,size,cached:cached>0,at:Date.now()});
+      if(!cached) toast('字体文件下载不了（对方不允许跨域），已改成在线引用，联网才显示');
+      else if(fail) toast('缓存了 '+cached+'/'+list.length+' 个字体文件');
+    }
+    fonts=await dbAll('fonts'); S.fontId=id; await dbPut('settings',S);
+    try{ await applyFont(); }catch(e){ toast('字体应用失败：'+e.message); }
+    renderSettings(); toast('字体已添加');
+  }catch(e){
+    toast('添加失败：'+e.message+'。这个站可能不允许跨域下载，把文件下载到本地再用「上传字体文件」');
+  }
+}
+
 function applyTheme(hex){
   const c=/^#?[0-9a-fA-F]{3,6}$/.test(String(hex||''))?hex:'#7A68F0';
   const rgb=hex2rgb(c);
@@ -5872,6 +6020,21 @@ function renderSettings(){
     <div class="hint">影响全站的按钮、链接、气泡、开关。换了立刻生效，保存后记住。<br>
       每个角色的气泡颜色可以在「聊天设置」里单独覆盖。</div>
 
+    <div class="grouptitle">字体</div>
+    <div class="group">
+      <div class="cell" onclick="useFont('')"><div class="lbl">系统默认</div><div class="val">${!S.fontId?'使用中':''}</div></div>
+      ${fonts.map(f=>`<div class="cell" onclick="useFont('${f.id}')">
+        <div class="lbl" style="font-family:'${f.family}',${f.cssFamily?`'${esc(f.cssFamily)}',`:''}var(--font-stack)">${esc(f.name)}</div>
+        <div class="val">${S.fontId===f.id?'使用中 · ':''}${fmtKB(f.size||0)}${f.kind==='css'&&!f.cached?' · 需联网':''}</div>
+        <button class="mini" style="margin-left:8px" onclick="event.stopPropagation();delFont('${f.id}')">删</button></div>`).join('')}
+      <div class="cell" onclick="document.getElementById('fontFile').click()"><div class="lbl">上传字体文件</div>${CHEV}</div>
+      <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" multiple style="display:none" onchange="importFontFiles(this)">
+      <div class="cell" onclick="addFontCss()"><div class="lbl">添加 CSS 链接 / 字体直链</div>${CHEV}</div>
+    </div>
+    <div class="hint">文件和链接里的字体都会存进这台设备的浏览器，之后不联网、不挂梯子也能显示。
+      CSS 链接会把里面的字体文件全部下载缓存（Google Fonts 的中文字体是几十个小文件，等它跑完）；对方不允许跨域下载时退回在线引用。
+      中文字体一般 5-20 MB，只存一次。字体不随「导出全部数据」走，换设备要重新导。</div>
+
     <div class="grouptitle">系统沉浸</div>
     <div class="group">
       ${S.homeBg?`<div class="cell static"><div class="lbl">沉浸模式</div>
@@ -6298,11 +6461,19 @@ async function showPov(id){
 function hidePov(){ const p=document.getElementById('povCard'); if(p) p.remove(); }
 
 /* 头像圆角 / 气泡文字颜色：都靠 CSS 变量下发，省得每条消息拼 style */
+/* 聊天设置里的预览气泡跟着圆角滑块变 */
+function previewRadius(v){
+  const w=document.querySelector('#s-chatSet .pvwrap'); if(!w) return;
+  const r=Number.isFinite(+v)?+v:20;
+  w.style.setProperty('--br',r+'px'); w.style.setProperty('--br-t',Math.min(7,r)+'px');
+}
 function applyChatSkin(cfg){
   const el=document.getElementById('s-chat');
   if(!el) return;
   const r=Number.isFinite(+cfg.avatarRadius)?+cfg.avatarRadius:50;
   el.style.setProperty('--av-r',r+'%');
+  const br=Number.isFinite(+cfg.bubbleRadius)?+cfg.bubbleRadius:20;
+  el.style.setProperty('--br',br+'px'); el.style.setProperty('--br-t',Math.min(7,br)+'px');
   el.style.setProperty('--tx-me',cfg.textMe||'');
   el.style.setProperty('--tx-ta',cfg.textTa||'');
   el.classList.toggle('cme',!!cfg.textMe);
@@ -6678,11 +6849,12 @@ function renderChatSet(){
 
     <div class="secband">外观</div>
     <div class="grouptitle">预览</div>
+    <div class="pvwrap" style="--br:${Number.isFinite(+g.bubbleRadius)?+g.bubbleRadius:20}px;--br-t:${Math.min(7,Number.isFinite(+g.bubbleRadius)?+g.bubbleRadius:20)}px">
     <div class="previewbox" ${draftChatBg?'onclick="pickChatBg()" style="cursor:pointer;'
       +`background:center/cover no-repeat url('${draftChatBg}')"`:'style="background:var(--chat-bg)"'}>
       <div class="pb ta" style="background:${g.bubbleTa||'var(--bubble-ta)'};color:${g.textTa||(g.bubbleTa?'#fff':'var(--bubble-ta-text)')};font-size:${g.fontSize}px">在呢，刚洗完澡</div>
       <div class="pb me" style="background:${g.bubbleMe||'var(--grad)'};color:${g.textMe||'#fff'};font-size:${g.fontSize}px">这么晚还在练？</div>
-    </div>
+    </div></div>
 
     <div class="grouptitle">我的气泡</div>
     <div class="group"><div class="field">
@@ -6715,6 +6887,15 @@ function renderChatSet(){
         <span style="width:52px;text-align:right;color:var(--sub)">${g.avatarRadius==50?'圆形':g.avatarRadius+'%'}</span></div>
     </div></div>
     <div class="hint">左边是方形，右边是圆形，中间是圆角方形。</div>
+
+    <div class="grouptitle">气泡圆角</div>
+    <div class="group"><div class="field">
+      <div class="inline"><input type="range" min="4" max="28" step="1" value="${Number.isFinite(+g.bubbleRadius)?+g.bubbleRadius:20}"
+        oninput="setCfg('bubbleRadius',parseInt(this.value),true);applyChatSkin({...draftCfg});previewRadius(this.value);
+          this.nextElementSibling.textContent=this.value+'px'" style="flex:1">
+        <span style="width:44px;text-align:right;color:var(--sub)">${Number.isFinite(+g.bubbleRadius)?+g.bubbleRadius:20}px</span></div>
+    </div></div>
+    <div class="hint">往左接近方角，往右最圆。上面的预览会跟着变，两边气泡一起改。</div>
 
     <div class="grouptitle">字号</div>
     <div class="group"><div class="field">
@@ -12353,6 +12534,7 @@ async function loadAll(){
   characters=await dbAll('characters');
   personas=await dbAll('personas');
   stickers=await dbAll('stickers');
+  fonts=await dbAll('fonts');
   diaries=await dbAll('diaries');
   moods=await dbAll('moods');
   worldbooks=(await dbAll('worldbooks')).map(normBook);
@@ -12381,6 +12563,7 @@ async function ensurePersona(){
   S=saved?{...DEFAULT_SETTINGS,...saved}:{...DEFAULT_SETTINGS};
   applyTheme(S.accent);
   await loadAll();
+  try{ await applyFont(); }catch(e){ console.warn('字体应用失败',e); }
   await ensurePersona();
 
   initKeyboardFix();
