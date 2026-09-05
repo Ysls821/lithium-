@@ -3322,6 +3322,7 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 1. 上一版让转 tag 的模型「不要写外貌，固定词里有」，但**没要求主体 tag**。如果角色的固定词是空的、或者固定词里没有 1boy，整段提示词里就没有任何「有一个人」的信息，NAI 只能跟着场景 tag 和 vibe 画，出来就是没人的诡异图。改成：第一个 tag 必须是主体（按角色性别 1boy / 1girl，solo），把角色名和设定摘要给它判断性别；角色没填固定词时连外貌一起写
 2. 用户没法确认「到底发了什么」。加了 `noteImgReq`：每次生成把后端、模型、尺寸、角色、角色固定词、画师串、画面 tag、最终正向、负向、vibe（几张、哪个组、强度、成功的写法）、结果全记下来，设置 → 生图 → 「上一次实际发给生图接口的内容」逐项列出，可一键复制。固定词为空时红字提醒
 3. 聊天里角色发照片而固定词为空时，toast 提醒一次去 编辑角色 填
+4. `buildImgPrompt` 去掉正向里完全重复的 tag（固定词和画面 tag 都写了 1boy / solo 时会出现两次），保留先出现的位置
 
 ---
 
@@ -10175,8 +10176,12 @@ function buildImgPrompt(scene,char){
     char:char&&char.imgPrompt?char.imgPrompt:'',
     scene:scene
   };
-  return (g.order||'artist,char,scene,quality').split(',')
+  const joined=(g.order||'artist,char,scene,quality').split(',')
     .map(k=>(part[k.trim()]||'').trim()).filter(Boolean).join(', ');
+  // 固定词和画面 tag 常常都写了 1boy / solo 这类，去掉完全相同的重复项（保留先出现的位置）
+  const seen=new Set(); const outT=[];
+  for(const t of joined.split(',')){ const x=t.trim(); if(!x) continue; const k=x.toLowerCase(); if(seen.has(k)) continue; seen.add(k); outT.push(x); }
+  return outT.join(', ');
 }
 function buildImgNegative(char){
   const g=imgCfg();
