@@ -3404,10 +3404,17 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - 出图失败的提示改写：明确「这段文字不是角色在回应你，是生图请求被当成聊天答了」
 - 设置页实时预览里，主 / 第二后端只要是「聊天接口」且模型不像图像模型，红字提醒
 
+### 2026-09-05（二十七）· 图片消息单独的长按菜单
+
+用户：图片消息和对话消息要分开的菜单，图片的只有重新生成、提示词参数、下载这些，别混着文字消息的操作。
+
+`msgMenu` 里 `type==='image'` 单独一支：看大图 / 重新生成这张（生成中会提示等一下）/ 提示词和参数（从生图记录找，找不到就把画面 tag 弹出来）/ 复制画面 tag / 下载到本地 / 存进 TA 的相册 / 引用回复 / 撤回（角色发的）/ 删除。不再出现引用之外的通用项（编辑、拆分、合并、贴表情、收藏、心声、存记忆、多选）。标题写「xx 的图片」。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **不同类型的消息共用一个菜单，等于每种都塞满不相干的项** → 消息类型一多，菜单按类型分支，每支只放该类型说得通的操作。
 - **报错里原样贴模型的话，用户会当成角色说的** → 把上游模型的文本回复放进错误提示时，必须先说明「这不是角色」。同样的文字放在不同位置，含义完全不同。
 - **先在线上复现再下结论** → 这条链路完整跑了一遍，确认代码没往聊天里写东西，才敢说问题在配置。
 - **从子页返回时要重渲染** → `show()` 只是切屏，数据面板不会自己更新。凡是「子页操作会改父页数据」的返回，回调里都要带一次 render。
@@ -7012,6 +7019,26 @@ function msgMenu(id){
     const m=ms.find(x=>x.id===id); if(!m) return;
     const idx=ms.indexOf(m);
     const c=characters.find(x=>x.id===curCharId);
+    if(m.type==='image'){
+      // 图片消息：只有图片相关的操作，不混通用的引用 / 编辑 / 拆分那些
+      const mt=m.meta||{}, gen=!!mt.gen, src=mt.src||'';
+      const ia=[];
+      if(src) ia.push({ic:'image',t:'看大图',fn:()=>openViewer(src)});
+      if(gen){
+        ia.push({ic:'sparkle',t:(mt.pending?'正在生成中…':'重新生成这张'),fn:async()=>{ if(mt.pending) return toast('还在生成，等一下'); const mm=await dbGet('messages',id); if(!mm) return; mm.meta.pending=true; await dbPut('messages',mm); await renderChat(); genChatImage(id); toast('已排队重新生成'); }});
+        ia.push({ic:'note',t:'提示词和参数',fn:async()=>{ imglog=(await dbAll('imglog')).sort((a,b)=>b.at-a.at); const r=imglog.find(x=>x.msgId===id); if(r) openImgDetail(r.id); else toast('这张没有记录（旧版本生成的）'+(mt.tags?'。画面 tag：'+mt.tags.slice(0,80):'')); }});
+        if(mt.tags) ia.push({ic:'copy',t:'复制画面 tag',fn:()=>{ navigator.clipboard?.writeText(mt.tags); toast('已复制'); }});
+      }
+      if(src){
+        ia.push({ic:'copy',t:'下载到本地',fn:()=>downloadImage(src,'小手机_'+fmtDay(m.timestamp).replace('/','-')+'.png')});
+        ia.push({ic:'plus',t:'存进 TA 的相册',fn:async()=>{ await addCharPhoto(curCharId,src,m.content||'',m.role==='user'?'user':'chat'); toast('已存进相册'); }});
+      }
+      ia.push({ic:'quote',t:'引用回复',fn:()=>setQuote(m)});
+      if(m.role==='assistant') ia.push({ic:'refresh',t:'撤回',fn:()=>recallMsg(id)});
+      ia.push({ic:'trash',t:'删除',danger:true,fn:async()=>{ if(!confirm('删除这张图？')) return; await dbDel('messages',id); renderChat(false); toast('已删除'); }});
+      actionSheet((m.role==='user'?personaOf(c).name:c.name)+'　的图片',ia);
+      return;
+    }
     const acts=[
       {ic:'quote',t:'引用回复',fn:()=>setQuote(m)},
       {ic:'copy',t:'复制',fn:()=>{ navigator.clipboard?.writeText(m.content); toast('已复制'); }},
@@ -7028,17 +7055,6 @@ function msgMenu(id){
       acts.push({ic:'select',t:'拆分',fn:()=>splitMsg(id)});
     if(m.type==='text'&&ms[idx+1]&&ms[idx+1].role===m.role&&ms[idx+1].type==='text')
       acts.push({ic:'quote',t:'和下一条合并',fn:()=>mergeMsg(id)});
-    if(m.type==='image'&&m.meta&&(m.meta.src||m.meta.gen)){
-      if(m.meta.src) acts.push({ic:'image',t:'看大图',fn:()=>openViewer(m.meta.src)});
-      if(m.meta.gen){
-        acts.push({ic:'sparkle',t:'重新生成这张照片',fn:async()=>{ const mm=await dbGet('messages',id); if(!mm) return; mm.meta.pending=true; await dbPut('messages',mm); await renderChat(); genChatImage(id); }});
-        acts.push({ic:'note',t:'看这张的提示词和参数',fn:async()=>{ imglog=(await dbAll('imglog')).sort((a,b)=>b.at-a.at); const r=imglog.find(x=>x.msgId===id); if(r) openImgDetail(r.id); else toast('这张没有记录（是旧版本生成的）'); }});
-      }
-      if(m.meta.src){
-        acts.push({ic:'copy',t:'下载图片',fn:()=>downloadImage(m.meta.src,'小手机_'+fmtDay(m.timestamp).replace('/','-')+'.png')});
-        acts.push({ic:'plus',t:'存进 TA 的相册',fn:async()=>{ await addCharPhoto(curCharId,m.meta.src,m.content||'',m.role==='user'?'user':'chat'); toast('已存进相册'); }});
-      }
-    }
     if(m.role==='assistant'){
       acts.push({ic:'refresh',t:'重新生成这条之后',fn:()=>regenFrom(idx)});
       acts.push({ic:'note',t:'重生成并附加要求',fn:()=>regenWithNote(idx)});
