@@ -1021,8 +1021,10 @@ input[type=range]{accent-color:var(--accent)}
 .vibecard.on{border-color:var(--accent)}
 .vibecard.sel{outline:2px solid var(--accent);outline-offset:2px}
 /* 头像框：叠在头像上；容器放开裁切，头像图自己按容器圆角裁 */
-.avframe{position:absolute;left:50%;top:50%;width:var(--frame-scale,135%);height:var(--frame-scale,135%);
-  transform:translate(-50%,-50%);max-width:none;max-height:none;pointer-events:none;z-index:3;object-fit:contain}
+.avframe{position:absolute!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;
+  width:var(--frame-scale,135%)!important;height:var(--frame-scale,135%)!important;
+  transform:translate(-50%,-50%)!important;max-width:none!important;max-height:none!important;
+  pointer-events:none;z-index:3;object-fit:contain!important;border-radius:0!important}
 *:has(> .avframe){position:relative;overflow:visible!important}
 *:has(> .avframe)>img:not(.avframe){border-radius:inherit}
 .framegrid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:2px 0 6px}
@@ -3248,6 +3250,7 @@ EVE 的原句（解码 0x27e6）就一行：
 - **怎么叠**：`avatarHTML` 拆成 `avatarInner` + `frameSrcFor`。所有画头像的地方都只传了头像图，所以按头像图反查是谁的（角色或身份），有框就在后面追加一张 `<img class="avframe">`。零改调用点，聊天、列表、朋友圈、X、TA 手机全站生效。代价：emoji 头像没有图可查，戴不了框
 - **CSS**：`.avframe` 绝对定位居中、`--frame-scale` 控制大小；`*:has(> .avframe)` 把容器 `overflow` 放开、`position:relative`，头像图 `border-radius:inherit` 自己裁圆。用 `:has` 是为了不去改十几个容器类
 - 设置 → 外观美化 → 头像框：显示开关、大小滑块（105% 到 175%，实时预览）、框库网格（点开改名 / 查看 / 删除，删除会把在用的角色清掉）
+- 线上验证时框和头像一样大：`.msg .av img{width:100%}` 这类容器规则的优先级压过了 `.avframe`。框的尺寸 / 定位全部加 `!important`，它本来就不该被任何容器规则改
 
 ---
 
