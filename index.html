@@ -3519,6 +3519,12 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 改法：`#phone:not(.imm)` 下面板贴底铺满、直角、实色 `--bar`（和输入栏、顶栏一个色）、无阴影、只留一条顶边线，微信那种；沉浸模式的玻璃卡片原样保留。
 
+### 2026-09-05（三十三）· 表情包：粘贴图床链接批量导入
+
+用户：表情包能不能用文字链接（图床链接）导入。
+
+设置 → 表情包 → 「导入图床链接」展开一个文本框，一行一个：`描述 链接`、`描述|链接`、markdown 的 `![描述](链接)`、或纯链接（用文件名当描述）。每条走 `shrinkSticker`：能跨域画到 canvas 的缩成 240px 本地图存起来，图床挂了也在；不让跨域的原样存链接，显示照常只是离线看不到。同名同图跳过，导入结果 toast 里分开报「只存了链接」的张数。
+
 ---
 
 ## 修过的坑（本次新增）
@@ -7951,13 +7957,57 @@ function renderStickers(){
          <span class="del" onclick="event.stopPropagation();delSticker('${st.id}')">×</span>
          <span class="nm">${esc(st.name)}</span></div>`).join('')
     +`<div class="stadd" onclick="importStickers()">${IC('plus',22)}导入图片</div></div>`
-    +`<div style="display:flex;gap:8px;padding:8px 16px 0">
+    +`<div style="display:flex;gap:8px;padding:8px 16px 0;flex-wrap:wrap">
         <button class="mini" onclick="importStickerPack()">导入打包文件（.json）</button>
+        <button class="mini" onclick="stLinkOpen=!stLinkOpen;renderStickers()">${stLinkOpen?'收起链接导入':'导入图床链接'}</button>
         ${stickers.length?`<button class="mini" onclick="exportStickerPack()">导出打包文件</button>`:''}
       </div>`
+    +(stLinkOpen?`<div class="group" style="margin:10px 16px 0"><div class="field">
+        <label>一行一个：描述 + 空格 + 链接；只给链接的话用文件名当描述</label>
+        <textarea id="st-links" style="min-height:120px;font-size:12.5px" placeholder="笑哭 https://img.xxx.com/a.png
+翻白眼 https://img.xxx.com/b.gif
+https://img.xxx.com/c.jpg">${esc(stLinkDraft)}</textarea></div>
+        <div style="display:flex;gap:8px;padding:0 0 8px"><button class="btn" style="margin:0" onclick="importStickerLinks()">导入这些链接</button></div></div>`:'')
     +`<div class="hint">描述就是模型识别表情包的唯一依据，写清楚点（「笑哭」「翻白眼」「比心」）。<br>
        导入图片默认用文件名当描述，点一下可以改。<br>
+       图床链接会尽量下载缩成本地小图存起来（以后图床挂了也在）；对方不允许跨域的就存链接，显示照常，只是离线看不到。也认 markdown 的 ![描述](链接) 写法。<br>
        打包文件支持小手机自己导出的包，也直接认 EVE 的「导出表情包库」文件；同名同图会跳过。</div>`;
+}
+let stLinkOpen=false, stLinkDraft='';
+/* 图床链接批量导入：每行「描述 链接」/「描述|链接」/「![描述](链接)」/ 纯链接 */
+async function importStickerLinks(){
+  const ta=document.getElementById('st-links'); const text=ta?ta.value:''; stLinkDraft=text;
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  if(!lines.length) return toast('先粘贴链接');
+  const items=[];
+  for(const line of lines){
+    let name='', url='';
+    let m=line.match(/^!\[([^\]]*)\]\((\S+?)\)/);
+    if(m){ name=m[1]; url=m[2]; }
+    else{
+      m=line.match(/(https?:\/\/\S+)/i);
+      if(!m) continue;
+      url=m[1]; name=line.replace(url,'').replace(/[|｜:：,，\s]+$/,'').replace(/^[|｜:：,，\s]+/,'').trim();
+    }
+    url=url.replace(/[)\]，,。]+$/,'');
+    if(!name) name=decodeURIComponent((url.split('/').pop()||'').split('?')[0]).replace(/\.[^.]+$/,'')||'表情';
+    items.push({name:name.slice(0,20),url});
+  }
+  if(!items.length) return toast('没找到链接');
+  toast('导入中 0/'+items.length);
+  let n=0, kept=0, dup=0;
+  for(const [i,it] of items.entries()){
+    if(stickers.some(x=>x.name===it.name&&x.src===it.url)){ dup++; continue; }
+    const src=await shrinkSticker(it.url);   // 缩成本地小图；跨域不让画就原样存链接
+    if(!src) continue;
+    if(src===it.url) kept++;
+    await dbPut('stickers',{id:uid(),name:it.name,src,createdAt:Date.now()});
+    n++;
+    if((i+1)%5===0) toast('导入中 '+(i+1)+'/'+items.length);
+  }
+  stickers=await dbAll('stickers');
+  stLinkDraft=''; stLinkOpen=false; renderStickers();
+  toast('导入了 '+n+' 张'+(kept?'，'+kept+' 张只存了链接':'')+(dup?'，'+dup+' 张已有跳过':''));
 }
 function importStickers(){
   const inp=document.createElement('input');
