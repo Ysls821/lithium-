@@ -3311,10 +3311,24 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 改法：只保留「裁掉透明边」这一步（这才是之前「比头像小」的真正原因），框的**外径**按头像的固定倍数放，默认 130%，滑块 100–180。装饰压住头像边缘一点是正常的。`fit` 还存着但不再参与显示。
 
+### 2026-09-05（二十一）· 生图链路逐节点核对：主体 tag、固定词提醒、「实际发出去的内容」面板
+
+用户：能出图了，但画面诡异、没有人，像只剩 vibe。质问角色固定词、画师串、负向到底有没有传给 NAI，要求整条链路每个节点重查。
+
+**核对结果**（代码层）：`buildImgPrompt` 按「提示词顺序」拼 画师串 / 角色固定词 / 画面 tag / 质量词，`buildImgNegative` 拼全局负向 + 角色负向；NAI 请求里 `input` 和 `v4_prompt.caption.base_caption` 都是这个正向，`negative_prompt` 和 `v4_negative_prompt` 都是这个负向；vibe 从当前组来。链路本身是通的。
+
+**真正的漏洞有两个**：
+
+1. 上一版让转 tag 的模型「不要写外貌，固定词里有」，但**没要求主体 tag**。如果角色的固定词是空的、或者固定词里没有 1boy，整段提示词里就没有任何「有一个人」的信息，NAI 只能跟着场景 tag 和 vibe 画，出来就是没人的诡异图。改成：第一个 tag 必须是主体（按角色性别 1boy / 1girl，solo），把角色名和设定摘要给它判断性别；角色没填固定词时连外貌一起写
+2. 用户没法确认「到底发了什么」。加了 `noteImgReq`：每次生成把后端、模型、尺寸、角色、角色固定词、画师串、画面 tag、最终正向、负向、vibe（几张、哪个组、强度、成功的写法）、结果全记下来，设置 → 生图 → 「上一次实际发给生图接口的内容」逐项列出，可一键复制。固定词为空时红字提醒
+3. 聊天里角色发照片而固定词为空时，toast 提醒一次去 编辑角色 填
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「别写 X」的指令要配「必须写 Y」** → 为了避免重复外貌，禁掉了外貌 tag，结果连主体都没了。删一类信息时要检查这类信息里有没有别处不提供的必需项（主体计数、性别）。
+- **用户问「真的传了吗」时，答案应该是一个面板不是一句话** → 把每次请求的实际内容展示出来，用户自己能核对，比反复解释代码可信。
 - **「适配」别追求几何上的精确** → 装饰框的洞和外径没有固定比例，按洞对齐会把框放到离谱。用户要的是「框看起来和头像配套」，外径按固定倍数 + 一个滑块就够，几何精确反而错。
 - **报错只截 120 字等于没报** → 「Validation error: error val…」后面才是字段名，截掉就只剩猜。接口原文至少留 500 字，展示的地方放不下就存起来点开看。
 - **参数写法拿不准就做成可退让的** → 第三方接口的校验规则文档不全时，与其赌一种写法，不如按可能性排好几种，400 就退到下一种，成功的记住。代价是最多多一两次请求，换来不用等用户回报。
@@ -9794,6 +9808,25 @@ function renderImgCfg(){
         onchange="setImg('autoPost',this.checked)"><i></i></label></div></div>
     <div class="hint">关掉的话帖子只带一段画面描述，长按那条动态 / 帖子再手动生成。每张图都是一次生图请求。</div>
 
+    <div class="grouptitle">上一次实际发给生图接口的内容</div>
+    ${(()=>{ const L=lastImgReq||S.lastImg; if(!L) return `<div class="hint">还没生成过。生成一张之后这里会列出实际发出去的每一项，可以对照检查角色固定词、画师串、负向、vibe 有没有带上。</div>`;
+      const row=(k,v)=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:.5px solid var(--line)"><b style="flex:0 0 86px;color:var(--sub);font-weight:500">${k}</b><span style="flex:1;min-width:0;word-break:break-word;white-space:pre-wrap">${esc(String(v||'（空）'))}</span></div>`;
+      const txt=[`时间：${fmtTime(L.at)}`,`后端：${IMG_BACKENDS[L.backend]||L.backend}${L.second?'（第二后端）':''}　模型：${L.model}　${L.size}　${L.steps} 步　CFG ${L.cfg}`,`角色：${L.charName}`,`角色固定词：${L.charPrompt||'（空）'}`,`画师串：${L.artist||'（空）'}`,`画面 tag：${L.scene}`,`最终正向：${L.prompt}`,`负向：${L.negative||'（空）'}`,`vibe：${L.vibes||'（无）'}${L.vibeMode?'　写法：'+L.vibeMode:''}`,`结果：${L.ok===true?'成功':(L.ok===false?'失败 '+(L.err||''):'未知')}`].join('\n');
+      return `<div class="group" style="padding:4px 12px;font-size:12.5px;line-height:1.5">
+        ${row('时间',fmtTime(L.at))}
+        ${row('后端',(IMG_BACKENDS[L.backend]||L.backend)+(L.second?'（第二后端）':'')+'　'+L.model+'　'+L.size+'　'+L.steps+' 步　CFG '+L.cfg)}
+        ${row('角色',L.charName)}
+        ${row('角色固定词',L.charPrompt)}
+        ${row('画师串',L.artist)}
+        ${row('画面 tag',L.scene)}
+        ${row('最终正向',L.prompt)}
+        ${row('负向',L.negative)}
+        ${row('vibe',(L.vibes||'（无）')+(L.vibeMode?'　写法：'+L.vibeMode:''))}
+        ${row('结果',L.ok===true?'成功':(L.ok===false?'失败 '+(L.err||''):'未知'))}
+        <div style="padding:8px 0 4px"><button class="mini" onclick="navigator.clipboard?.writeText(${JSON.stringify(txt).replace(/"/g,'&quot;')}).then(()=>toast('已复制'))">复制这些</button></div>
+      </div>
+      ${!L.charPrompt&&L.charName!=='（无角色）'?`<div class="hint" style="color:var(--danger)">角色固定词是空的：NAI 不知道要画谁，出来的图只会跟着画面 tag 和 vibe 走。去 编辑角色 → 生图固定提示词 填上外貌 tag（1boy, black hair, … 这种）。</div>`:''}`; })()}
+
     <div class="grouptitle">诊断</div>
     <div id="diagBox"></div>
     <button class="btn ghost" onclick="testLink()">测试链接</button>
@@ -10285,6 +10318,8 @@ async function buildVibeParams(g){
   };
 }
 
+let lastImgReq=null;   // 上一次实际发出的生图请求（设置 → 生图 → 诊断 里能看）
+function noteImgReq(o){ lastImgReq={at:Date.now(),...o}; try{ S.lastImg={...lastImgReq}; dbPut('settings',S); }catch(e){} }
 async function generateImage(scene,char,opt){
   opt=opt||{};
   let g=imgCfg();
@@ -10299,6 +10334,10 @@ async function generateImage(scene,char,opt){
   // 第二后端只发画面描述：画师串 / 质量词 / 负向都是给 NAI 那类模型准备的
   const prompt=g._plain?String(scene||'').trim():buildImgPrompt(scene,char);
   const negative=g._plain?'':buildImgNegative(char);
+  noteImgReq({backend:g.backend,second:!!useSecond,model:g.model,size:g.w+'×'+g.h,steps:g.steps,cfg:g.cfg,
+    charName:char?char.name:'（无角色）',charPrompt:char&&char.imgPrompt?char.imgPrompt:'',
+    artist:(g.artists&&(g.artists.find(a=>a.id===g.activeArtist)||{}).text)||'',
+    scene:String(scene||''),prompt,negative,vibes:null,vibeMode:'',ok:null});
 
   if(g.backend==='chat') return await chatImage(ep,g.model,prompt,negative);
 
@@ -10321,6 +10360,8 @@ async function generateImage(scene,char,opt){
     }else{ base.sm=false; base.sm_dyn=false; }
     // vibe 的参数写法：V4 系列接口校验很严，一种写法 400 就换下一种，最后不带 vibe 再试一次。
     // 哪种成功了记下来（S.img.v4VibeMode），下次直接用
+    if(lastImgReq){ const grp=vibeGroupsOf(g); const gg=grp.groups.find(x=>x.id===grp.active);
+      lastImgReq.vibes=vibe?`${vibe.reference_image_multiple.length} 张（组「${gg?gg.name:'?'}」，强度 ${vibe.reference_strength_multiple.join(' / ')}）`:(g.vibeOn?'0 张（组里没有可用的）':'关'); }
     const variants=[];
     if(vibe){
       const full={...vibe,...(isV4?{normalize_reference_strength_multiple:true}:{})};
@@ -10338,12 +10379,14 @@ async function generateImage(scene,char,opt){
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+g.key},
         body:JSON.stringify({input:prompt,model:g.model,action:'generate',parameters:{...base,...(v||{})}})});
       if(r.ok){
+        if(lastImgReq){ lastImgReq.ok=true; lastImgReq.vibeMode=!vibe?'无':(v===null?'被拒，未带':(v.reference_information_extracted_multiple?'全字段':'去掉 info 数组')); S.lastImg={...lastImgReq}; dbPut('settings',S).catch(()=>{}); }
         if(vibe&&v===null) toast('vibe 参数被 NovelAI 拒绝（400），这张没带 vibe');
         else if(vibe&&isV4&&i>0){ S.img={...(S.img||{}),v4VibeMode:v.reference_information_extracted_multiple?'full':'noinfo'}; dbPut('settings',S).catch(()=>{}); }
         return await unzipFirstPng(await r.arrayBuffer());
       }
       let d=''; try{ d=(await r.text()).slice(0,600); }catch(e){}
       lastErr=`${r.status} ${d}`.trim();
+      if(lastImgReq){ lastImgReq.ok=false; lastImgReq.err=lastErr; S.lastImg={...lastImgReq}; }
       if(r.status!==400||v===null||i===variants.length-1) throw new Error(lastErr);
       console.warn('NAI 400，换一种 vibe 写法重试：',lastErr);
     }
@@ -12688,15 +12731,22 @@ async function doAiRecall(){
 /* 中文照片描述 → NovelAI 风格英文 tag。角色外貌固定词另外拼，这里只写动作 / 表情 / 服饰 / 场景 / 光线 */
 async function descToTags(desc,c){
   const fixed=c&&c.imgPrompt?String(c.imgPrompt).trim():'';
+  const who=c?`照片里的人是「${c.name}」${c.bio?'（'+String(c.bio).replace(/\s+/g,' ').slice(0,160)+'…）':''}`:'照片里没有人';
   const q=`把下面这段照片描述转成 NovelAI（danbooru 风格）的英文 tag，给生图用。
 
 描述：${desc}
+${who}
+${c?`
+**第一个 tag 必须是主体**：按这个角色的性别写 1boy 或 1girl（拿不准按设定里的称呼判断），有几个人就写几个，只有 TA 自己就加 solo。没有主体 tag NAI 不会画人。`:''}
 ${fixed?`
-角色的外貌固定 tag 已经另外拼上了（${fixed}），**不要写外貌**：发型发色瞳色身材这些一个都不要。`:''}
+角色的外貌固定 tag 已经另外拼上了（${fixed}），主体之外**不要再写外貌**：发型发色瞳色身材这些一个都不要。`
+:(c?`
+这个角色没有填固定外貌词，所以外貌也要写：从设定里能看出来的发型、发色、瞳色、体型、年龄感都写上。`:'')}
 按这个顺序写：
-1. 背景 / 场景 / 光线 / 氛围（在哪、几点、什么天气、什么光）
-2. 角色在做什么：姿势、动作、表情、视线、手在干什么、镜头构图（自拍 / 镜子 / 俯拍 / 特写…）
-3. 穿着：每件衣服、颜色、材质、配饰、状态（湿的、皱的、半脱的…）
+1. 主体（1boy / 1girl / solo…）
+2. 背景 / 场景 / 光线 / 氛围（在哪、几点、什么天气、什么光）
+3. 角色在做什么：姿势、动作、表情、视线、手在干什么、镜头构图（自拍 / 镜子 / 俯拍 / 特写…）
+4. 穿着：每件衣服、颜色、材质、配饰、状态（湿的、皱的、半脱的…）
 数量不限——画面复杂就多写，把描述里每个细节都落成 tag，别为了凑短而漏东西。
 逗号分隔，不要画师名，不要质量词，不要句子，不要解释。只输出 tag。`;
   let t=(await callAPI([{role:'user',content:q}])).trim();
@@ -12730,6 +12780,7 @@ async function runGenQ(){
         continue;
       }
       let src=null, err='', tags=String(m.meta.tags||'').trim();
+      if(person&&!c.imgPrompt&&!window._warnedNoImgPrompt){ window._warnedNoImgPrompt=true; toast('「'+c.name+'」没填生图固定提示词，NAI 不知道画谁。去 编辑角色 → 生图固定提示词 填外貌 tag'); }
       // 第二步：模型写的是中文描述，先转成 NAI 的英文 tag（角色固定词、画师串、质量词、vibe 由 generateImage 按装配顺序拼）
       if(!tags||/[\u4e00-\u9fff]/.test(tags)){
         try{ tags=await descToTags(tags?tags+'。'+desc:desc,person?c:null); }
