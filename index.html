@@ -3064,10 +3064,28 @@ EVE 的原句（解码 0x27e6）就一行：
 
 原来的「导入」改名「导入图片」（本来就支持多选）。
 
+### 2026-09-05（六）· lithium / X 的帖子不再被刷新冲掉
+
+用户：小照以往发过的 X 帖子和朋友圈应该留着，不要每次刷新全没了。
+
+查了一下：朋友圈本来就是往 `moments` 表追加的，不会丢。丢的是 **X**——X 上角色的帖子来自「TA 的手机 → lithium」，`refreshLi` 每次都让模型生成一整份账号快照，然后整个 `c.li` 覆盖掉，旧帖只有正文恰好被复述时才能借图和评论续命。评论通知、私信同理，全是一次性的。
+
+改成**增量**：
+
+- 第一次刷新还是生成整份（4-6 条帖子、2-3 条私密、评论、私信）
+- 之后每次只让模型生成「上次之后新发生的」：新帖 1-3 条、新评论 3-5 条、新私信 1-3 条，提示词里把旧帖列给它（带时间）要求接着时间线往后发
+- 新帖插最前，旧帖原样保留（图、评论、私密状态都在），同文去重，上限 60 条；评论通知累积到 40 条；私信按人合并——同一个人再发就接在原对话后面并顶到最上，新人新开一条，上限 12 个
+- 「折腾主页」那条：以前是模型重生成时顺手把某条设私密，现在改成返回 `hideOld`（旧帖开头 10 字），只动旧的、只动公开的
+- 账号名一旦有了就不再随刷新变；签名按「自动改动」开关
+
+**时间跟着走**：以前帖子只存模型写的「2小时前」文字，攒起来之后全是「2小时前」。现在每条帖子/评论/私信都存 `at` 时间戳（把模型写的相对时间按刷新时刻折算），显示时用 `liTime()` 按现在算，旧帖会自然变成「3天前」「8月26日」。老数据没有 `at` 的，`liBackfill()` 用上次刷新时刻做基准补一次。X 的动态流按 `at` 把各账号的帖子真正交错排。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「刷新」被做成「重来」** → lithium 每次刷新让模型重出一整份快照再整体覆盖，用户攒了几周的帖子一按就没。凡是有积累意义的内容（帖子、动态、日记、评论），刷新的语义都必须是「生成新增的那部分叠上去」，整份重生成只允许发生在第一次。
+- **相对时间不能存文字** → 「2小时前」存成字符串，攒起来之后每条都是「2小时前」。要存时间戳，显示时再算；模型给的相对时间在写入那一刻就折算掉。
 - **用户说「照抄 EVE」时不要再自己发明** → 条数这件事连改两版都在自作主张（先钉下限、再推目标），用户要的只是 EVE 那一行。有可参照的原文时，第一步是原样抄过来，效果不对再动。
 - **「区间等于下限」不是定律** → 上一条坑写得太绝对。EVE 的「最少两三条，最多 20 条」在用户那里跑得好好的，模型确实会按剧情在区间里浮动。说得少的原因要去别处找（示例、模型、上下文），不要先怪措辞。
 
@@ -9495,6 +9513,44 @@ function testGen(){
    lithium —— 角色的社交账号（推特样式）
    ============================================================ */
 let liTab='posts';
+/* 「2小时前」这类相对时间 → 绝对时间戳；base 是这段文字写下的时刻 */
+function liParseTime(t,base){
+  base=base||Date.now(); t=String(t||'').trim();
+  let m;
+  if(!t||/刚刚|刚才|just/i.test(t)) return base;
+  if((m=t.match(/(\d+)\s*(秒)/))) return base-(+m[1])*1e3;
+  if((m=t.match(/(\d+)\s*(分钟|分)/))) return base-(+m[1])*6e4;
+  if((m=t.match(/(\d+)\s*(小时|时|h)/i))) return base-(+m[1])*36e5;
+  if((m=t.match(/(\d+)\s*(天|d)/i))) return base-(+m[1])*864e5;
+  if((m=t.match(/(\d+)\s*(周|星期|w)/i))) return base-(+m[1])*7*864e5;
+  if((m=t.match(/(\d+)\s*(个月|月)/))) return base-(+m[1])*30*864e5;
+  if(/昨天|昨晚/.test(t)) return base-864e5;
+  if(/前天/.test(t)) return base-2*864e5;
+  if(/上周|上星期/.test(t)) return base-7*864e5;
+  if(/上个月|上月/.test(t)) return base-30*864e5;
+  const d=Date.parse(t); if(!isNaN(d)) return d;
+  return base;
+}
+/* 相对时间显示：有 at 就按现在算（旧帖会自然变成「3天前」），没有就用当时那句文字 */
+function liTime(x){
+  if(!x) return '';
+  if(!x.at) return x.time||'';
+  const d=Date.now()-x.at;
+  if(d<6e4) return '刚刚';
+  if(d<36e5) return Math.floor(d/6e4)+'分钟前';
+  if(d<864e5) return Math.floor(d/36e5)+'小时前';
+  if(d<2*864e5) return '昨天';
+  if(d<7*864e5) return Math.floor(d/864e5)+'天前';
+  const dt=new Date(x.at), y=dt.getFullYear()!==new Date().getFullYear()?dt.getFullYear()+'年':'';
+  return y+(dt.getMonth()+1)+'月'+dt.getDate()+'日';
+}
+/* 老数据没有 at：用上次刷新的时刻做基准把文字时间折算成时间戳，只补一次 */
+function liBackfill(L){
+  const base=L.at||Date.now();
+  for(const k of ['posts','comments','dms'])
+    for(const x of (L[k]||[])) if(!x.at) x.at=liParseTime(x.time,base);
+  return L;
+}
 const liData=c=>({handle:'',bio:'',followers:0,following:0,cover:'',
   posts:[],dms:[],comments:[],at:0,...(c&&c.li||{})});
 
@@ -9503,7 +9559,7 @@ function liGo(t){ liTab=t; renderLi(); }
 
 function renderLi(){
   const c=characters.find(x=>x.id===curCharId);
-  const L=liData(c);
+  const L=liBackfill(liData(c));
   const unread=(L.dms||[]).filter(d=>d.unread).length;
   const newC=(L.comments||[]).filter(x=>x.unread).length;
   const nfmt=n=>n>=10000?(n/10000).toFixed(1)+'万':String(n);
@@ -9535,7 +9591,7 @@ function renderLi(){
       <div class="lipost" data-lp="liPostMenu" data-lpid="${i}" onclick="if(!guard())openPost(${i})">
         <div class="av4">${avatarHTML(c.avatar)}</div>
         <div class="lc">
-          <div class="lh"><b>${esc(L.handle||'lithium')}</b><span>@${esc((L.handle||'lithium').toLowerCase())} · ${esc(p.time||'')}</span></div>
+          <div class="lh"><b>${esc(L.handle||'lithium')}</b><span>@${esc((L.handle||'lithium').toLowerCase())} · ${esc(liTime(p))}</span></div>
           ${p.private?`<div class="lipriv">${IC('star',11)}已设为私密</div>`:''}
           <div class="lt">${esc(p.text||'')}</div>
           ${p.img?`<div class="lim"><img src="${esc(p.img)}" onclick="openViewer((characters.find(x=>x.id==='${curCharId}').li.posts[${i}]||{}).img)"></div>`
@@ -9553,7 +9609,7 @@ function renderLi(){
     body=(L.comments||[]).length?L.comments.map((x,i)=>`
       <div class="licmt" onclick="liReadC(${i})">
         <div class="av4" style="background:${liColor(x.who)}">${esc((x.who||'?').slice(0,1))}</div>
-        <div class="cc"><div class="ch"><b>${esc(x.who)}</b> · ${esc(x.time||'')}</div>
+        <div class="cc"><div class="ch"><b>${esc(x.who)}</b> · ${esc(liTime(x))}</div>
           <div class="cx">${esc(x.text)}</div>
           ${x.on?`<div class="cq">回复了：${esc(x.on)}</div>`:''}</div>
         ${x.unread?`<span class="bd" style="position:static;align-self:center">新</span>`:''}
@@ -9581,7 +9637,7 @@ function renderLi(){
         <div class="dc2"><div class="dn2">${esc(d.who)}
           ${d.unread?`<span class="bd" style="position:static">新</span>`:''}</div>
           <div class="dp">${esc(d.last||'')}</div></div>
-        <div class="dt2">${esc(d.time||'')}</div>
+        <div class="dt2">${esc(liTime(d))}</div>
       </div>`).join('')
       :`<div class="empty"><p>还没有私信</p></div>`;
   }
@@ -9617,7 +9673,7 @@ async function liReadDm(i){
   d.unread=false; await dbPut('characters',c); characters=await dbAll('characters');
   _acts=[];
   document.getElementById('sheetTitle').textContent=d.who;
-  document.getElementById('sheetCount').textContent=d.time||'';
+  document.getElementById('sheetCount').textContent=liTime(d);
   document.getElementById('sheetSearchWrap').style.display='none';
   document.getElementById('sheetList').innerHTML=(d.msgs||[{from:'them',text:d.last}]).map(m=>
     `<div class="it" style="cursor:default;align-items:flex-start">
@@ -9690,7 +9746,7 @@ function renderX(){
         <div class="lipost" onclick="openXPost('${c.id}',${i})" style="cursor:pointer">
           <div class="av4">${avatarHTML(c.avatar)}</div>
           <div class="lc">
-            <div class="lh"><b>${esc(name)}</b><span>@${esc(String(name).toLowerCase())} · ${esc(p.time||'')}</span></div>
+            <div class="lh"><b>${esc(name)}</b><span>@${esc(String(name).toLowerCase())} · ${esc(liTime(p))}</span></div>
             <div class="lt">${esc(p.text||'')}</div>
             ${p.img?`<div class="lim"><img src="${esc(p.img)}"
               onclick="openViewer((characters.find(x=>x.id==='${c.id}').li.posts||[]).filter(q=>!q.private)[${i}].img)"></div>`:''}
@@ -9715,6 +9771,7 @@ function renderXMe(){
     const L=liData(c);
     (L.posts||[]).forEach((p,i)=>{ if(!p.private) feed.push({c,p,i}); });
   }
+  feed.sort((a,b)=>(b.p.at||0)-(a.p.at||0));   // 各账号的帖子按真实时间交错
   document.getElementById('xBody').innerHTML=`
     <div class="liprof">
       <div class="cov3"></div>
@@ -9734,7 +9791,7 @@ function renderXMe(){
       <div class="lipost" onclick="openXPost('',${i})" style="cursor:pointer">
         <div class="av4" style="background:var(--grad)">${avatarHTML((personas[0]||{}).avatar)}</div>
         <div class="lc">
-          <div class="lh"><b>${esc(myXName())}</b><span>@${esc(myXHandle())} · ${esc(p.time||'')}</span></div>
+          <div class="lh"><b>${esc(myXName())}</b><span>@${esc(myXHandle())} · ${esc(liTime(p))}</span></div>
           <div class="lt">${esc(p.text||'')}</div>
           <div class="lact"><span>${IC('quote',15)}${(p.comments||[]).length}</span>
             <span>${IC('star',15)}${p.likes||0}</span></div>
@@ -9755,7 +9812,7 @@ function renderXMe(){
       return `<div class="lipost" onclick="openXPost('${f.c.id}',${f.i})" style="cursor:pointer">
         <div class="av4">${avatarHTML(f.c.avatar)}</div>
         <div class="lc">
-          <div class="lh"><b>${esc(name)}</b><span>@${esc(String(name).toLowerCase())} · ${esc(f.p.time||'')}</span></div>
+          <div class="lh"><b>${esc(name)}</b><span>@${esc(String(name).toLowerCase())} · ${esc(liTime(f.p))}</span></div>
           <div class="lt">${esc(f.p.text||'')}</div>
           ${f.p.img?`<div class="lim"><img src="${esc(f.p.img)}"></div>`:''}
           <div class="lact"><span>${IC('quote',15)}${(f.p.comments||[]).length||f.p.replies||0}</span>
@@ -9847,7 +9904,7 @@ function renderXPost(){
           <div style="font-size:12.5px;color:var(--sub)">@${esc(String(name).toLowerCase())}</div></div></div>
       <div class="dtx">${esc(p.text||'')}</div>
       ${p.img?`<div class="lim" style="margin-bottom:10px"><img src="${esc(p.img)}"></div>`:''}
-      <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(p.time||'')}</div>
+      <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(liTime(p))}</div>
       <div class="dstat"><span><b>${cs.length||p.replies||0}</b> 回复</span>
         <span><b>${p.likes||0}</b> 赞</span></div>
       <button class="btn ghost" style="margin:10px 0 0" onclick="shareXToChat()">转发到你们的聊天</button>
@@ -9856,7 +9913,7 @@ function renderXPost(){
     ${cs.length?cs.map(x=>`
       <div class="licmt${x.mine?' mine':''}">
         <div class="av4" style="background:${x.mine?'var(--accent)':liColor(x.who)}">${esc((x.who||'?').slice(0,1))}</div>
-        <div class="cc"><div class="ch"><b>${esc(x.who)}</b>${x.mine?'<span class="metag">我</span>':''} · ${esc(x.time||'')}</div>
+        <div class="cc"><div class="ch"><b>${esc(x.who)}</b>${x.mine?'<span class="metag">我</span>':''} · ${esc(liTime(x))}</div>
           <div class="cx">${esc(x.text)}</div>
           ${x.reply?`<div class="cq">${esc(name)} 回复：${esc(x.reply)}</div>`:''}</div>
       </div>`).join('')
@@ -9874,7 +9931,7 @@ function renderXPostMine(p){
         <div><div style="font-weight:700;font-size:15.5px">${esc(myXName())}</div>
           <div style="font-size:12.5px;color:var(--sub)">@${esc(myXHandle())}</div></div></div>
       <div class="dtx">${esc(p.text||'')}</div>
-      <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(p.time||'')}</div>
+      <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(liTime(p))}</div>
       <div class="dstat"><span><b>${cs.length}</b> 回复</span><span><b>${p.likes||0}</b> 赞</span></div>
       <button class="btn ghost" style="margin:10px 0 0" onclick="shareMyXToChat()">转发给角色…</button>
     </div>
@@ -9882,7 +9939,7 @@ function renderXPostMine(p){
     ${cs.length?cs.map(x=>`
       <div class="licmt${x.mine?' mine':''}">
         <div class="av4" style="background:${x.mine?'var(--accent)':liColor(x.who)}">${esc((x.who||'?').slice(0,1))}</div>
-        <div class="cc"><div class="ch"><b>${esc(x.who)}</b>${x.mine?'<span class="metag">我</span>':''} · ${esc(x.time||'')}</div>
+        <div class="cc"><div class="ch"><b>${esc(x.who)}</b>${x.mine?'<span class="metag">我</span>':''} · ${esc(liTime(x))}</div>
           <div class="cx">${esc(x.text)}</div></div>
       </div>`).join('')
       :`<div class="empty" style="padding:26px 0"><p>还没有评论<br>关注你的人可能过一会儿来</p></div>`}
@@ -10504,7 +10561,7 @@ function renderPost(){
         onclick="openViewer((characters.find(x=>x.id==='${curCharId}').li.posts[${liPostIdx}]||{}).img)"></div>`
         :(p.imgDesc?`<div class="lim" style="margin-bottom:10px"><div class="locked">${IC('image',26)}
           ${p.private?'内容已私密':esc(p.imgDesc)}</div></div>`:'')}
-      <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(p.time||'')}</div>
+      <div style="font-size:12.5px;color:var(--sub2);margin-bottom:10px">${esc(liTime(p))}</div>
       <div class="dstat"><span><b>${p.replies||0}</b> 回复</span>
         <span><b>${p.likes||0}</b> 赞</span></div>
     </div>
@@ -10513,7 +10570,7 @@ function renderPost(){
     ${cs.length?cs.map(x=>`
       <div class="licmt">
         <div class="av4" style="background:${liColor(x.who)}">${esc((x.who||'?').slice(0,1))}</div>
-        <div class="cc"><div class="ch"><b>${esc(x.who)}</b> · ${esc(x.time||'')}</div>
+        <div class="cc"><div class="ch"><b>${esc(x.who)}</b> · ${esc(liTime(x))}</div>
           <div class="cx">${esc(x.text)}</div>
           ${x.reply?`<div class="cq">lithium 回复：${esc(x.reply)}</div>`:''}</div>
       </div>`).join('')
@@ -10644,7 +10701,7 @@ function renderLiUser(){
       <div class="lipost">
         <div class="av4" style="${u.isMe?'':'background:'+liColor(u.name)}">
           ${u.isMe?avatarHTML(me.avatar):esc((u.name||'?').slice(0,1))}</div>
-        <div class="lc"><div class="lh"><b>${esc(u.name)}</b><span>@${esc(u.handle||'')} · ${esc(p.time||'')}</span></div>
+        <div class="lc"><div class="lh"><b>${esc(u.name)}</b><span>@${esc(u.handle||'')} · ${esc(liTime(p))}</span></div>
           <div class="lt">${esc(p.text||'')}</div>
           <div class="lact"><span>${IC('quote',15)}${p.replies||0}</span>
             <span>${IC('star',15)}${p.likes||0}</span></div></div>
@@ -10715,23 +10772,34 @@ async function refreshFollows(silent){
   }catch(e){ if(!silent) toast('失败：'+e.message); return false; }
 }
 
-/* 让模型生成一整份账号快照 */
+/* 刷新 lithium：第一次生成整份快照；之后每次只生成「这段时间新发生的」，叠在旧内容上面。
+   旧帖、旧评论、旧私信全部保留（图、评论、私密状态都在），不会被刷掉。 */
 async function refreshLi(silent){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('正在刷新 lithium…');
   try{
     const ms=(await msgsOf(curCharId)).slice(-14);
-    const convo=ms.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m)).join('\n');
-    const mood=moodOf(curCharId,today(),'char');
-    const old=liData(c);
-    const keep=(old.posts||[]).slice(0,4).map(p=>'- '+p.text).join('\n');
+    const old=liBackfill(liData(c));
+    const oldPosts=old.posts||[];
+    const first=!oldPosts.length;
+    const autoChange=(c.phoneCfg||{}).autoChange!==false;
+    const keep=oldPosts.slice(0,8).map(p=>'- '+(p.private?'（已私密）':'')+p.text+'　（'+liTime(p)+'）').join(NL);
     const p=`${storyCtx(c,{msgs:ms,take:16,skip:['social']})}
-${keep?`\n你之前发过的帖子（不要重复）：\n${keep}`:''}
-${(c.phoneCfg||{}).liPrompt?`\n## 额外要求（优先满足）\n${(c.phoneCfg||{}).liPrompt}`:''}
-${(c.phoneCfg||{}).autoChange!==false?`\n你偶尔会折腾自己的主页——改签名、把某条旧帖设成私密。
-如果这次想改签名，就在 bio 里写个新的；不想改就沿用「${esc0(old.bio||'')}」。`:`\n签名保持「${esc0(old.bio||'')}」不要改。`}
+${keep?`
+你之前发过的帖子（都还挂在主页上，不要重复、不要改写，新帖接着这条时间线往后发）：
+${keep}`:''}
+${(c.phoneCfg||{}).liPrompt?`
+## 额外要求（优先满足）
+${(c.phoneCfg||{}).liPrompt}`:''}
+${autoChange?`
+你偶尔会折腾自己的主页——改签名、把某条旧帖设成私密。
+如果这次想改签名，就在 bio 里写个新的；不想改就沿用「${esc0(old.bio||'')}」。
+想把哪条旧帖设成私密，就把它开头的 10 个字写进 hideOld；不想动就给空数组。`:`
+签名保持「${esc0(old.bio||'')}」不要改。hideOld 给空数组。`}
 
-生成你这个社交账号此刻的样子。这是个匿名账号，粉丝不知道你现实里是谁。
+${first
+  ?'生成你这个社交账号此刻的样子。'
+  :'距离上次打开这个账号又过了一阵。只生成这段时间**新发生的**：新发的帖子、新收到的评论、新来的私信——旧的都还在，不用重写。'}这是个匿名账号，粉丝不知道你现实里是谁。
 
 只输出 JSON，不要任何解释：
 {
@@ -10743,6 +10811,7 @@ ${(c.phoneCfg||{}).autoChange!==false?`\n你偶尔会折腾自己的主页——
     {"text":"帖子正文，10-60字","time":"2小时前","likes":数字,"replies":数字,
      "private":false,"imgDesc":"如果这条配图，写英文 danbooru tag 描述这张图；纯文字帖就留空字符串"}
   ],
+  "hideOld": ["要设成私密的旧帖开头10字"],
   "comments": [
     {"who":"评论者昵称","text":"评论内容，15字内","on":"评论的是哪条帖子的前10字","time":"1小时前","unread":true}
   ],
@@ -10753,10 +10822,14 @@ ${(c.phoneCfg||{}).autoChange!==false?`\n你偶尔会折腾自己的主页——
 }
 
 要求：
-- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前尺度大的内容，现在设成私密了，正文可以写得暧昧但不要露骨）
+${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前尺度大的内容，现在设成私密了，正文可以写得暧昧但不要露骨）
 - 公开的那几条是漂亮的画、拍的风景、日常碎片，可以配图（imgDesc 写英文 tag）
-- comments 给 4-6 条，来自不同的人，语气要杂——有真心夸的、有油腻的、有催更的、有阴阳怪气的
-- dms 给 3-4 条，同样语气各异，可以有让人不适的
+- comments 给 4-6 条，来自不同的人
+- dms 给 3-4 条`
+:`- posts 只给**上次之后新发的 1-3 条**，素材从上面的行程和剧情里挑，time 写离现在多久（"3小时前""昨天"）；大多公开，偶尔一条 private:true；这段时间没什么想发的也可以只给 1 条
+- comments 给 3-5 条**新收到的**，可以评在旧帖下面（on 写那条帖子的前 10 字）
+- dms 给 1-3 条新的，可以是老对话里那个人又发来了（who 用同一个名字，msgs 只写新增的几句），也可以是新来的人`}
+- 评论和私信的语气要杂——有真心夸的、有油腻的、有催更的、有阴阳怪气的，可以有让人不适的
 - 昵称要像真实网友，不要"用户A"这种`;
     let t=(await callAPI([{role:'user',content:p}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
@@ -10764,38 +10837,67 @@ ${(c.phoneCfg||{}).autoChange!==false?`\n你偶尔会折腾自己的主页——
     const j=JSON.parse(t);
     const S1=x=>String(x==null?'':x).trim();
     const num=x=>Math.max(0,Math.round(+x)||0);
-    // 已经生成过图/拉过评论的帖子保留下来，不要被刷掉
-    const oldImgs={}, oldCmts={};
-    for(const op of (old.posts||[])){
-      if(op.img) oldImgs[op.text]=op.img;
-      if((op.comments||[]).length) oldCmts[op.text]=op.comments;
+    const now=Date.now();
+
+    // 帖子：新的插到最前，旧的原样保留；同文去重
+    const seen=new Set(oldPosts.map(x=>x.text));
+    const fresh=(Array.isArray(j.posts)?j.posts:[]).slice(0,first?8:4).map(x=>({
+      text:S1(x.text).slice(0,120), time:S1(x.time).slice(0,10), at:liParseTime(x.time,now),
+      likes:num(x.likes), replies:num(x.replies), private:!!x.private,
+      imgDesc:S1(x.imgDesc).slice(0,160), img:null, liked:false, comments:[]}))
+      .filter(x=>x.text&&!seen.has(x.text)&&seen.add(x.text));
+    const posts=[...fresh,...oldPosts].slice(0,60);
+    // 把旧帖设成私密（只动旧的，只动公开的）
+    let hid=0;
+    if(autoChange) for(const h of (Array.isArray(j.hideOld)?j.hideOld:[]).slice(0,3)){
+      const k=S1(h).slice(0,10); if(!k) continue;
+      const tgt=oldPosts.find(x=>!x.private&&x.text.startsWith(k));
+      if(tgt){ tgt.private=true; hid++; }
     }
+
+    // 评论通知：新的插前面
+    const freshC=(Array.isArray(j.comments)?j.comments:[]).slice(0,10).map(x=>({
+      who:S1(x.who).slice(0,14), text:S1(x.text).slice(0,60), on:S1(x.on).slice(0,20),
+      time:S1(x.time).slice(0,10), at:liParseTime(x.time,now), unread:x.unread!==false}))
+      .filter(x=>x.text);
+    const comments=[...freshC,...(old.comments||[])].slice(0,40);
+
+    // 私信：同一个人就接在原对话后面并顶到最上，新人就新开一条
+    const dms=(old.dms||[]).map(d=>({...d,msgs:[...(d.msgs||[])]}));
+    let nd=0;
+    for(const x of (Array.isArray(j.dms)?j.dms:[]).slice(0,8)){
+      const who=S1(x.who).slice(0,14); if(!who) continue;
+      const msgs=(Array.isArray(x.msgs)?x.msgs:[]).slice(0,8)
+        .map(y=>({from:y.from==='me'?'me':'them', text:S1(y.text).slice(0,120)})).filter(y=>y.text);
+      const last=S1(x.last).slice(0,60)||(msgs.length?msgs[msgs.length-1].text:'');
+      if(!last) continue;
+      const item={who,last,time:S1(x.time).slice(0,10),at:liParseTime(x.time,now),unread:x.unread!==false};
+      const i=dms.findIndex(d=>d.who===who);
+      if(i>=0){
+        const d=dms.splice(i,1)[0];
+        const have=new Set(d.msgs.map(m=>m.from+'|'+m.text));
+        const add=msgs.filter(m=>!have.has(m.from+'|'+m.text));
+        dms.unshift({...d,...item,msgs:[...d.msgs,...add].slice(-40)});
+      } else dms.unshift({...item,msgs});
+      nd++;
+    }
+    dms.splice(12);
+
     c.li={
-      handle:(c.xname||S1(j.handle)||c.name||'lithium').slice(0,16),
-      bio:S1(j.bio).slice(0,40),
-      followers:num(j.followers), following:num(j.following),
-      posts:(Array.isArray(j.posts)?j.posts:[]).slice(0,8).map(x=>({
-        text:S1(x.text).slice(0,120), time:S1(x.time).slice(0,10),
-        likes:num(x.likes), replies:num(x.replies), private:!!x.private,
-        imgDesc:S1(x.imgDesc).slice(0,160),
-        img:oldImgs[S1(x.text).slice(0,120)]||null, liked:false,
-        comments:oldCmts[S1(x.text).slice(0,120)]||[]})),
-      comments:(Array.isArray(j.comments)?j.comments:[]).slice(0,10).map(x=>({
-        who:S1(x.who).slice(0,14), text:S1(x.text).slice(0,60),
-        on:S1(x.on).slice(0,20), time:S1(x.time).slice(0,10), unread:x.unread!==false})),
+      ...old,
+      // 账号名一旦有了就不再随刷新变；bio 按开关
+      handle:(c.xname||old.handle||S1(j.handle)||c.name||'lithium').slice(0,16),
+      bio:(autoChange?S1(j.bio).slice(0,40):'')||old.bio||S1(j.bio).slice(0,40),
+      followers:num(j.followers)||old.followers||0, following:num(j.following)||old.following||0,
+      posts, comments, dms,
       users:old.users||[], cover:old.cover||'',
-      dms:(Array.isArray(j.dms)?j.dms:[]).slice(0,8).map(x=>({
-        who:S1(x.who).slice(0,14), last:S1(x.last).slice(0,60),
-        time:S1(x.time).slice(0,10), unread:x.unread!==false,
-        msgs:(Array.isArray(x.msgs)?x.msgs:[]).slice(0,8).map(y=>({
-          from:y.from==='me'?'me':'them', text:S1(y.text).slice(0,120)}))})),
-      at:Date.now()
+      at:now
     };
-    // 把旧的图也带回去
     await dbPut('characters',c); characters=await dbAll('characters');
-    renderLi(); if(!silent) toast('刷新好了');
-    // 最新那条帖子顺手把评论拉起来，老帖子留着点进去再拉
-    if((c.li.posts||[]).length && !(c.li.posts[0].comments||[]).length){
+    renderLi();
+    if(!silent) toast(first?'刷新好了':`新帖 ${fresh.length} · 评论 ${freshC.length} · 私信 ${nd}`+(hid?` · 设私密 ${hid}`:''));
+    // 新发的那条顺手把评论拉起来，老帖子留着点进去再拉
+    if(fresh.length && !(c.li.posts[0].comments||[]).length){
       liPostIdx=0;
       await loadPostComments(true);
       if(!silent){ show('s-li'); renderLi(); } else renderLi();
