@@ -1023,7 +1023,7 @@ input[type=range]{accent-color:var(--accent)}
 /* 头像框：叠在头像上；容器放开裁切，头像图自己按容器圆角裁 */
 .avframe{position:absolute!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;
   width:var(--frame-scale,130%)!important;height:var(--frame-scale,130%)!important;
-  transform:translate(-50%,-50%)!important;max-width:none!important;max-height:none!important;
+  transform:translate(calc(-50% + var(--fdx,0%)),calc(-50% + var(--fdy,0%)))!important;max-width:none!important;max-height:none!important;
   pointer-events:none;z-index:3;object-fit:contain!important;border-radius:0!important}
 *:has(> .avframe){position:relative;overflow:visible!important}
 *:has(> .avframe)>img:not(.avframe){border-radius:inherit}
@@ -3324,10 +3324,25 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 3. 聊天里角色发照片而固定词为空时，toast 提醒一次去 编辑角色 填
 4. `buildImgPrompt` 去掉正向里完全重复的 tag（固定词和画面 tag 都写了 1boy / solo 时会出现两次），保留先出现的位置
 
+### 2026-09-05（二十二）· 头像框模板尺寸 + 按模板对齐 + 位置微调
+
+用户：想要一个固定尺寸，以后每个框都按它做，传进来就正好；她自己裁过的框大小对了但上下位置不对。
+
+位置偏的原因：上传时按内容裁边再取方块中心，装饰不对称（顶上一只蝙蝠）时方块中心就不是环心。
+
+- **模板尺寸**：画布 1024×1024，头像是正中直径 788px 的圆（= 1024 / 1.3，四边留 118px），框的内圈贴着这个圆画，元素不超出画布。生成了 `头像框模板_1024.png`（透明底 + 淡紫辅助圆 + 十字线）放在项目目录和下载文件夹，垫底画用
+- **两种对齐模式**：上传时同时存 `src`（按内容裁边）和 `full`（整张画布，只去底不裁），`mode:'crop'|'full'`。按模板画的框在菜单里切到「按模板对齐」，位置就是模板里的位置
+- **位置微调**：`dx / dy`（百分比，±30），菜单里上下左右各 3% 一步，归零；CSS 用 `translate(calc(-50% + var(--fdx)), calc(-50% + var(--fdy)))`
+- 图标表补了 chev / minus 两个
+
+**同一版顺带的排查开关**（用户报最新版生出来是糊成一团的噪点图，没有 token 复现不了）：生成页加「这张不带 vibe」开关（`opt.noVibe`）用来二分是 vibe 字段的问题还是参数的问题；「上一次实际发给生图接口的内容」多记一份完整请求参数（base64 只留开头和长度），可复制发出来对。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **自动对齐和「用户按规范做」是两条路，都要留** → 自动裁边适合随手生的图，但会破坏用户精心摆好的位置；给一个固定模板 + 「不裁边」开关，用户愿意按规范做时就能一次到位。
+- **菜单里用不存在的图标名不报错** → `IC('chev')` 查不到就渲染成空 svg，肉眼才发现。新用图标名先查表。
 - **「别写 X」的指令要配「必须写 Y」** → 为了避免重复外貌，禁掉了外貌 tag，结果连主体都没了。删一类信息时要检查这类信息里有没有别处不提供的必需项（主体计数、性别）。
 - **用户问「真的传了吗」时，答案应该是一个面板不是一句话** → 把每次请求的实际内容展示出来，用户自己能核对，比反复解释代码可信。
 - **「适配」别追求几何上的精确** → 装饰框的洞和外径没有固定比例，按洞对齐会把框放到离谱。用户要的是「框看起来和头像配套」，外径按固定倍数 + 一个滑块就够，几何精确反而错。
@@ -3688,8 +3703,10 @@ function frameSrcFor(a){
   return frames.find(x=>x.id===owner.frame)||null;
 }
 /* f 可以是框记录 {src,fit} 或直接一个 src；fit 是「边长 / 内圈直径」，没有就按 1.35 */
-const frameImg=f=>{ if(!f) return ''; const src=typeof f==='string'?f:f.src, fit=(typeof f==='object'&&f.fit)||1.35;
-  return src?`<img class="avframe" style="--fit:${fit}" src="${esc(src)}" alt="">`:''; };
+const frameImg=f=>{ if(!f) return '';
+  const src=typeof f==='string'?f:((f.mode==='full'&&f.full)?f.full:f.src);
+  const dx=(typeof f==='object'&&+f.dx)||0, dy=(typeof f==='object'&&+f.dy)||0;
+  return src?`<img class="avframe" style="--fdx:${dx}%;--fdy:${dy}%" src="${esc(src)}" alt="">`:''; };
 const avatarHTML=a=>avatarInner(a)+frameImg(frameSrcFor(a));
 /* 编辑页预览用：框还没保存，按草稿画 */
 const avatarWithFrame=(a,fid)=>avatarInner(a)+frameImg((frames||[]).find(x=>x.id===fid)||null);
@@ -3716,6 +3733,7 @@ const ICO_MEM='<svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-li
 
 /* ---------- 图标（统一线性 SVG，不用 emoji） ---------- */
 const ICP={
+ chev:'<path d="M6 9l6 6 6-6"/>', minus:'<path d="M5 12h14"/>',
  image:'<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5L5 20"/>',
  mic:'<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v4"/>',
  location:'<path d="M12 21s7-5.6 7-11a7 7 0 10-14 0c0 5.4 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
@@ -4706,7 +4724,8 @@ async function importFrames(inp){
       const raw=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(new Error('读不出来')); fr.readAsDataURL(f); });
       const r=await frameCutout(raw,512);
       const ft=await frameFit(r.src);
-      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',src:ft.src,fit:ft.fit,at:Date.now()});
+      // src = 按内容裁边后的；full = 整张画布（按模板画的框用这个，位置才准）
+      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',src:ft.src,full:r.src,fit:ft.fit,mode:'crop',dx:0,dy:0,at:Date.now()});
       n++; if(r.cut) cut++;
     }catch(e){ toast(f.name+'：'+e.message); }
   }
@@ -4717,9 +4736,19 @@ async function importFrames(inp){
 function frameMenu(id){
   const f=frames.find(x=>x.id===id); if(!f) return;
   const usedBy=[...characters.filter(c=>c.frame===id).map(c=>c.name),...personas.filter(p=>p.frame===id).map(p=>p.name)];
+  const save=async()=>{ await dbPut('frames',f); frames=await dbAll('frames'); renderSettings(); if(document.getElementById('s-chat').classList.contains('active')) renderChat(); };
+  const nudge=(k,d)=>async()=>{ f[k]=Math.max(-30,Math.min(30,Math.round(((+f[k]||0)+d)*10)/10)); await save(); frameMenu(id); };
   actionSheet(f.name+(usedBy.length?'　'+usedBy.join('、')+' 在用':''),[
-    {ic:'edit',t:'改名字',fn:async()=>{ const n=prompt('名字：',f.name); if(n&&n.trim()){ f.name=n.trim().slice(0,12); await dbPut('frames',f); frames=await dbAll('frames'); renderSettings(); } }},
-    {ic:'image',t:'查看',fn:()=>openViewer(f.src)},
+    {ic:'edit',t:'改名字',fn:async()=>{ const n=prompt('名字：',f.name); if(n&&n.trim()){ f.name=n.trim().slice(0,12); await save(); } }},
+    ...(f.full?[{ic:'sparkle',t:f.mode==='full'?'现在：按模板对齐（整张画布）　→ 改为按内容裁边':'现在：按内容裁边　→ 改为按模板对齐（整张画布）',
+      fn:async()=>{ f.mode=f.mode==='full'?'crop':'full'; await save(); }}]:[]),
+    {ic:'note',t:`位置微调　上下 ${(+f.dy||0)>0?'+':''}${+f.dy||0}%　左右 ${(+f.dx||0)>0?'+':''}${+f.dx||0}%`,fn:()=>frameMenu(id)},
+    {ic:'chev',t:'上移 3%',fn:nudge('dy',-3)},
+    {ic:'chev',t:'下移 3%',fn:nudge('dy',3)},
+    {ic:'chev',t:'左移 3%',fn:nudge('dx',-3)},
+    {ic:'chev',t:'右移 3%',fn:nudge('dx',3)},
+    ...((+f.dx||+f.dy)?[{ic:'refresh',t:'位置归零',fn:async()=>{ f.dx=0; f.dy=0; await save(); frameMenu(id); }}]:[]),
+    {ic:'image',t:'查看',fn:()=>openViewer(f.mode==='full'&&f.full?f.full:f.src)},
     {ic:'trash',t:'删除',danger:true,fn:async()=>{
       if(!confirm('删除这个头像框？'+(usedBy.length?'在用它的会变回没有框。':''))) return;
       await dbDel('frames',id);
@@ -6409,7 +6438,8 @@ function renderSettings(){
       <div class="frameadd" onclick="document.getElementById('frameFile').click()">${IC('plus',20)}上传</div>
     </div>
     <input type="file" id="frameFile" accept="image/*" multiple style="display:none" onchange="importFrames(this)">
-    <div class="hint">上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边。框的外径按头像的倍数放，装饰压住头像边缘一点是正常的。
+    <div class="hint"><b>想一次套准，按模板画</b>：画布 1024×1024，头像是正中直径 788px 的圆（四边留 118px），框的内圈贴着这个圆，元素不超出画布；上传后点这个框选「按模板对齐」。项目目录和下载文件夹里有一张 <code>头像框模板_1024.png</code> 带辅助圆，垫在底下画就行。<br>
+      上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边。框的外径按头像的倍数放，装饰压住头像边缘一点是正常的。位置偏了点框，菜单里有上下左右微调。
       给谁戴：编辑角色 / 编辑身份里选。头像是 emoji 的戴不了框，得用图片头像。</div>
 
     <div class="grouptitle">系统沉浸</div>
@@ -9824,7 +9854,8 @@ function renderImgCfg(){
         ${row('负向',L.negative)}
         ${row('vibe',(L.vibes||'（无）')+(L.vibeMode?'　写法：'+L.vibeMode:''))}
         ${row('结果',L.ok===true?'成功':(L.ok===false?'失败 '+(L.err||''):'未知'))}
-        <div style="padding:8px 0 4px"><button class="mini" onclick="navigator.clipboard?.writeText(${JSON.stringify(txt).replace(/"/g,'&quot;')}).then(()=>toast('已复制'))">复制这些</button></div>
+        <div style="padding:8px 0 4px;display:flex;gap:8px"><button class="mini" onclick="navigator.clipboard?.writeText(${JSON.stringify(txt).replace(/"/g,'&quot;')}).then(()=>toast('已复制'))">复制这些</button>
+          ${L.params?`<button class="mini" onclick="navigator.clipboard?.writeText((lastImgReq||S.lastImg).params).then(()=>toast('完整请求已复制'))">复制完整请求参数</button>`:''}</div>
       </div>
       ${!L.charPrompt&&L.charName!=='（无角色）'?`<div class="hint" style="color:var(--danger)">角色固定词是空的：NAI 不知道要画谁，出来的图只会跟着画面 tag 和 vibe 走。去 编辑角色 → 生图固定提示词 填上外貌 tag（1boy, black hair, … 这种）。</div>`:''}`; })()}
 
@@ -10334,6 +10365,7 @@ async function generateImage(scene,char,opt){
     const g2=img2Cfg();
     g={...g,backend:g2.backend,base:g2.base,key:g2.key,model:g2.model,vibeOn:false,_plain:true};
   }
+  if(opt.noVibe) g={...g,vibeOn:false};
   const ep=imgEndpoint(g);
   if(!ep.base) throw new Error(useSecond?'第二后端地址没填':(g.backend==='chat'?'聊天接口地址也没填':'还没配生图地址'));
   // 第二后端只发画面描述：画师串 / 质量词 / 负向都是给 NAI 那类模型准备的
@@ -10379,10 +10411,12 @@ async function generateImage(scene,char,opt){
     let lastErr='';
     for(let i=0;i<variants.length;i++){
       const v=variants[i];
+      const payload={input:prompt,model:g.model,action:'generate',parameters:{...base,...(v||{})}};
+      if(lastImgReq){ lastImgReq.params=JSON.stringify(payload,(k,val)=>typeof val==='string'&&val.length>120?val.slice(0,24)+'…(共 '+val.length+' 字符)':val,1); }
       const r=await fetch(g.base.replace(/\/+$/,'')+'/ai/generate-image',{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+g.key},
-        body:JSON.stringify({input:prompt,model:g.model,action:'generate',parameters:{...base,...(v||{})}})});
+        body:JSON.stringify(payload)});
       if(r.ok){
         if(lastImgReq){ lastImgReq.ok=true; lastImgReq.vibeMode=!vibe?'无':(v===null?'被拒，未带':(v.reference_information_extracted_multiple?'全字段':'去掉 info 数组')); S.lastImg={...lastImgReq}; dbPut('settings',S).catch(()=>{}); }
         if(vibe&&v===null) toast('vibe 参数被 NovelAI 拒绝（400），这张没带 vibe');
@@ -10616,6 +10650,9 @@ function renderGen(){
         `<div class="${(genCtx.route||'auto')===k?'on':''}" onclick="genCtx.scene=(document.getElementById('gen-scene')||{}).value||genCtx.scene;genCtx.route='${k}';renderGen()">${v}</div>`).join('')}
     </div>
     <div class="hint" style="margin-top:-4px">自动：选了角色走主后端，没选角色走第二后端。</div>`:''}
+    ${imgCfg().vibeOn?`<div class="group" style="margin-bottom:10px"><div class="cell static"><div class="lbl">这张不带 vibe　排查用</div>
+      <label class="switch"><input type="checkbox" ${genCtx.noVibe?'checked':''}
+        onchange="genCtx.scene=(document.getElementById('gen-scene')||{}).value||genCtx.scene;genCtx.noVibe=this.checked"><i></i></label></div></div>`:''}
     <div class="grouptitle">画面描述　英文 tag</div>
     <div class="group"><div class="field">
       <textarea id="gen-scene" style="min-height:84px"
@@ -10655,7 +10692,7 @@ async function doGenerate(){
   genCtx.busy=true; renderGen();
   try{
     const c=genCtx.charId?characters.find(x=>x.id===genCtx.charId):null;
-    genCtx.src=await generateImage(genCtx.scene,c,{route:genCtx.route&&genCtx.route!=='auto'?genCtx.route:undefined});
+    genCtx.src=await generateImage(genCtx.scene,c,{route:genCtx.route&&genCtx.route!=='auto'?genCtx.route:undefined,noVibe:!!genCtx.noVibe});
     genCtx.busy=false; renderGen(); toast('生成好了');
   }catch(e){ genCtx.busy=false; renderGen(); toast('生成失败：'+e.message); }
 }
