@@ -1384,7 +1384,7 @@ input[type=range]{accent-color:var(--accent)}
 .xbar .xsw{font-size:12.5px;color:var(--accent);padding:6px 12px;border-radius:16px;
   background:var(--accent-soft);cursor:pointer;flex:0 0 auto}
 
-/* lithium 二级页 */
+/* X 二级页 */
 .lidetail{padding:16px 16px 12px;border-bottom:.5px solid var(--line)}
 .lidetail .dh2{display:flex;gap:11px;align-items:center;margin-bottom:10px}
 .lidetail .dtx{font-size:17px;line-height:1.62;white-space:pre-wrap;margin-bottom:10px}
@@ -1718,7 +1718,7 @@ input[type=range]{accent-color:var(--accent)}
     <div class="screen overlay phscreen" id="s-li">
       <div class="navbar"><button class="lead" onclick="goBack()">
         <svg width="10" height="17" viewBox="0 0 10 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L1.5 8.5l7 7"/></svg>手机</button>
-        <div class="title"><b>lithium</b></div><div class="sp"></div>
+        <div class="title"><b>X</b></div><div class="sp"></div>
         <button onclick="liMenu()">···</button>
         <button onclick="refreshLi()">刷新</button></div>
       <div class="body" id="liBody"></div>
@@ -1808,7 +1808,7 @@ input[type=range]{accent-color:var(--accent)}
 
     <div class="screen overlay phscreen" id="s-liPost">
       <div class="navbar"><button class="lead" onclick="goBack()">
-        <svg width="10" height="17" viewBox="0 0 10 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L1.5 8.5l7 7"/></svg>lithium</button>
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L1.5 8.5l7 7"/></svg>X</button>
         <div class="title"><b>帖子</b></div><div class="sp"></div>
         <button onclick="loadPostComments(true)">刷新评论</button></div>
       <div class="body" id="liPostBody"></div>
@@ -3490,10 +3490,25 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 顺便加了诊断：聊天设置 → 调试 → 「上一次模型原始回复」，弹出原文并复制，显示解析出几条。以后再出现「只回一条」，一眼能分清是模型只给了一个元素，还是解析出了问题。
 
+### 2026-09-05（三十一）· 「lithium」是姬照的账号名，不是软件名
+
+用户：lithium 是姬照自己的社媒账号名，别的角色的手机里那个软件也叫 lithium 就不对了；软件统一叫 X，角色设定里的字段也叫 X。
+
+当初做 TA 手机里的社交 App 时拿姬照的账号名当了软件名，之后到处写死：App 图标、页面标题、导航栈名、总刷新里的名字、相册来源、生图设置文案、提示词里的「你的 lithium 账号」、DM 里「我」显示成 lithium、帖子没有账号名时兜底显示 lithium。
+
+改法：
+
+- 显示名全部改成 **X**：TA 手机的 App、页面标题、总刷新项、相册和生图记录里的来源、壁纸设置的「X 头图」、各处提示文案
+- 提示词里的「lithium 账号」统一改成「X 账号」
+- 账号名统一走 `liName(L)`：填过的 handle → 编辑角色里的「X 账号」→ 角色名，不再兜底成 lithium。帖子头、详情页、评论区的「博主回复」、私信里的「我」都用它
+- 编辑角色的 X 账号占位符改成「例如：某个网名，留空就用角色名」
+- 内部键名（`k:'lithium'`、`source:'lithium'` 这类存储用的）不动，旧数据不受影响；姬照自己的账号名是她填的 handle，照常显示 lithium
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **别拿样例数据当产品名** → 做功能时手边只有一个角色，顺手把她的账号名当成了软件名，一直没人发现。凡是「这个角色的」东西都要和「这个软件的」分开命名。
 - **示范比规则强** → 提示词里写「至少两三条」，历史里却每轮只有一句，模型一定跟历史走。凡是要模型延续的格式，历史里就得按那个格式呈现，不能只靠一句规则。
 - **「只回一条」先看原文再猜** → 模型原始回复没留下来，就分不清是模型少给还是解析合并。任何「输出不对」的问题，第一步都是把原文留下来。
 - **半透明栏只在「底下是纯色」时好看** → 毛玻璃栏叠在任意图片上，颜色就不受控。有图的场景要么整体沉浸（栏也透明），要么栏改实底，不能停在中间。
@@ -3790,7 +3805,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const personaOf=c=>personas.find(p=>p.id===c?.personaId)||personas[0]||{name:'我',persona:'',avatar:''};
 
 /* ---------- 导航栈 ----------
-   手机里的页面是有层级的：手机 → lithium → 帖子详情，
+   手机里的页面是有层级的：手机 → X → 帖子详情，
    返回应该回上一层而不是一路弹回聊天页 */
 let navStack=[], navHome='s-chats';
 function navReset(home){ navStack=[]; if(home) navHome=home; }
@@ -3821,8 +3836,8 @@ function backHome(){
 }
 function navLabel(){
   const p=navStack[navStack.length-2];
-  const names={'s-phone':'手机','s-li':'lithium','s-app':'手机','s-chat':'消息',
-    's-liPost':'lithium','s-liDm':'私信','s-liUser':'lithium'};
+  const names={'s-phone':'手机','s-li':'X','s-app':'手机','s-chat':'消息',
+    's-liPost':'X','s-liDm':'私信','s-liUser':'X'};
   return p?(names[p.id]||'返回'):'消息';
 }
 
@@ -5505,7 +5520,7 @@ function editChar(id){
 
     <div class="grouptitle">X 账号</div>
     <div class="group"><div class="field"><label>账号名　TA 在社交平台上叫什么</label>
-      <input id="f-xname" value="${esc(c.xname||'')}" placeholder="例如：lithium"></div></div>
+      <input id="f-xname" value="${esc(c.xname||'')}" placeholder="例如：某个网名，留空就用角色名"></div></div>
     <div class="hint">留空就用角色名。你可以在「X」这个 App 里看到所有角色的账号。</div>
 
     <div class="grouptitle">生图固定提示词</div>
@@ -5657,7 +5672,7 @@ async function saveChar(){
   const wbIds=[...document.querySelectorAll('#f-wbs .chip.on')].map(e=>e.dataset.id);
   const old=editingCharId?characters.find(x=>x.id===editingCharId):null;
   await dbPut('characters',{
-    ...(old||{}),          // 聊天设置 / 手机 / lithium / 日记 / 关系都在旧对象上，别整个盖掉
+    ...(old||{}),          // 聊天设置 / 手机 / X / 日记 / 关系都在旧对象上，别整个盖掉
     id:editingCharId||uid(), name, avatar:draftAvatar,
     bio:document.getElementById('f-bio').value,
     xname:((document.getElementById('f-xname')||{}).value||'').trim(),
@@ -6363,7 +6378,7 @@ function crossMemText(char){
     (x.author==='user'?'对方发「':'你发「')+String(x.text).slice(0,40)+'」').join('；'));
   const L=char.li;
   if(L&&(L.posts||[]).length)
-    bits.push('你的 lithium：'+L.posts.slice(0,2).map(x=>'「'+String(x.text).slice(0,36)+'」').join('；'));
+    bits.push('你的 X：'+L.posts.slice(0,2).map(x=>'「'+String(x.text).slice(0,36)+'」').join('；'));
   const xl=(char.xlog||[]).slice(-3);
   if(xl.length) bits.push('X 上：'+xl.map(x=>
     x.kind==='dm'?'私信往来':'评论互动').join('、'));
@@ -7676,7 +7691,7 @@ function renderChatSet(){
     <div class="group"><div class="cell static">
       <div class="main" style="flex:1;min-width:0"><div class="lbl">带上别处发生的事</div>
         <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
-          朋友圈 / lithium / X / TA 和别人的聊天</div></div>
+          朋友圈 / X / X / TA 和别人的聊天</div></div>
       <label class="switch"><input type="checkbox" ${g.crossMem!==false?'checked':''}
         onchange="setCfg('crossMem',this.checked)"><i></i></label></div>
     </div>
@@ -7711,7 +7726,7 @@ function renderChatSet(){
           oninput="setCfg('xdmHours',parseInt(this.value)||6,true)"></div>`:''}
     </div>
     <div class="hint">主聊天安静超过 30 分钟后掷骰子，中了就让 TA 用 X 上的匿名小号
-      主动私信你——借另一个身份说现实里说不出口的话。要先在 TA 的手机里刷出 lithium 账号。
+      主动私信你——借另一个身份说现实里说不出口的话。要先在 TA 的手机里刷出 X 账号。
       收到会推送通知，内容在 X → 那个账号 → 私信里。</div>
 
 
@@ -9171,7 +9186,7 @@ const RF_DEFS=[
   {k:'status', n:'此刻状态',  d:'状态 / 电量步数 / 音乐 / 便签 / 浏览记录',      fn:()=>refreshStatus(true)},
   {k:'journal',n:'起居注',    d:'一整天的时间轴，意外事件到点解锁',              fn:()=>refreshJournal(true)},
   {k:'chats',  n:'TA 的聊天', d:'TA 和别人的会话列表',                          fn:()=>refreshPhChats(true)},
-  {k:'li',     n:'lithium',   d:'帖子 / 评论 / 私信，X 里看到的也是这份',        fn:()=>refreshLi(true)},
+  {k:'li',     n:'X',         d:'TA 的社媒账号：帖子 / 评论 / 私信',              fn:()=>refreshLi(true)},
   {k:'follows',n:'关注列表',  d:'TA 关注了哪些账号',                            fn:()=>refreshFollows(true)},
   {k:'shop',   n:'购物',      d:'购物车和最近的订单',                            fn:()=>refreshShop(true)},
   {k:'diary',  n:'日记',      d:'让 TA 写（或重写）今天的日记',                  fn:()=>askDiary(true)},
@@ -10142,18 +10157,18 @@ function renderImgCfg(){
         <button class="mini" onclick="fetchImg2Models()">拉取</button></div></div>
     </div>
     <button class="btn ghost" onclick="testImg2()">用第二后端试生成一张风景</button>`:''}
-    <div class="hint">NovelAI 画人像强、画风景饭照弱。开了以后：朋友圈 / lithium / 聊天里标了「没有本人」的图，以及生成页里没选角色的图，都走这里。
+    <div class="hint">NovelAI 画人像强、画风景饭照弱。开了以后：朋友圈 / X / 聊天里标了「没有本人」的图，以及生成页里没选角色的图，都走这里。
       这条路只发画面描述，不拼画师串和质量词。宽高步数沿用上面的。</div>
 
     <div class="grouptitle">自动配图</div>
-    <div class="group"><div class="cell static"><div class="lbl">TA 发朋友圈 / lithium 帖子时自动出图</div>
+    <div class="group"><div class="cell static"><div class="lbl">TA 发朋友圈 / X 帖子时自动出图</div>
       <label class="switch"><input type="checkbox" ${g.autoPost!==false?'checked':''}
         onchange="setImg('autoPost',this.checked)"><i></i></label></div></div>
     <div class="hint">关掉的话帖子只带一段画面描述，长按那条动态 / 帖子再手动生成。每张图都是一次生图请求。</div>
 
     <div class="grouptitle">生图记录</div>
     <div class="group"><div class="cell" onclick="openImgLog()"><div class="lbl">所有生成过的图　含提示词和参数</div>${CHEV}</div></div>
-    <div class="hint">聊天里 TA 发的照片、朋友圈 / lithium 配图、生成页出的图都在，点开能看当时发了什么、重新生成、下载、存进 TA 的相册。只留最近 ${IMGLOG_MAX} 张。</div>
+    <div class="hint">聊天里 TA 发的照片、朋友圈 / X 配图、生成页出的图都在，点开能看当时发了什么、重新生成、下载、存进 TA 的相册。只留最近 ${IMGLOG_MAX} 张。</div>
 
     <div class="grouptitle">上一次实际发出的请求　生成后自动更新</div>
     ${(()=>{ const L=lastImgReq||S.lastImg; if(!L) return `<div class="hint">还没生成过。生成一张之后这里会列出实际发出去的每一项，可以对照检查角色固定词、画师串、负向、vibe 有没有带上。</div>`;
@@ -10683,7 +10698,7 @@ let lastImgReq=null;   // 上一次实际发出的生图请求（设置 → 生�
 function noteImgReq(o){ lastImgReq={at:Date.now(),...o}; try{ S.lastImg={...lastImgReq}; dbPut('settings',S); }catch(e){} }
 /* ---------- TA 的手机 → 相册：一张张的图，点开看参数 / 点亮 / 删 ---------- */
 let albumCid=null, albumKey=null;
-const ALBUM_SRC={chat:'TA 发给你的',moment:'朋友圈',lithium:'lithium',images:'角色图片',user:'你发的',gen:'生成页'};
+const ALBUM_SRC={chat:'TA 发给你的',moment:'朋友圈',lithium:'X',images:'角色图片',user:'你发的',gen:'生成页'};
 function albumItems(c){
   const out=[];
   (c.photos||[]).forEach((p,i)=>out.push({key:'p'+i,src:p.src,caption:p.caption||'',from:p.from||'chat',at:p.at||0,fav:!!p.fav,del:true}));
@@ -10700,7 +10715,7 @@ function renderAlbum(){
       <img src="${esc(it.src)}" alt="">${it.fav?'<span class="favb">★</span>':''}
       <span class="tag">${esc(ALBUM_SRC[it.from]||it.from||'照片')}</span></div>`).join('')}</div>
     <div class="hint">${items.length} 张。★ 是 TA 点亮过的。点开看说明、参数，或者删掉。</div>`
-    :`<div class="empty"><p>相册是空的<br>TA 发过的照片、朋友圈和 lithium 的配图、编辑角色里加的图都会在这</p></div>`;
+    :`<div class="empty"><p>相册是空的<br>TA 发过的照片、朋友圈和 X 的配图、编辑角色里加的图都会在这</p></div>`;
 }
 function openPhoto(key){ albumKey=key; goTo('s-photo',renderPhoto); }
 function renderPhoto(){
@@ -10712,7 +10727,7 @@ function renderPhoto(){
     ${it.key[0]==='p'?`<button class="btn ${it.fav?'':'ghost'}" onclick="togglePhotoFav('${it.key}')">${it.fav?'★ TA 点亮了这张　点一下取消':'☆ 替 TA 点亮这张'}</button>`:''}
     <button class="btn ghost" onclick="photoParams('${it.key}')">看参数和当时的描述</button>
     <button class="btn ghost" onclick="downloadImage(this.parentNode.querySelector('img').src,'小手机_photo.png')">下载到本地</button>
-    ${it.del?`<button class="btn danger" onclick="delPhoto('${it.key}')">删除这张</button>`:`<div class="hint">这是 lithium 帖子的配图，要删去 lithium 那条帖子里删。</div>`}
+    ${it.del?`<button class="btn danger" onclick="delPhoto('${it.key}')">删除这张</button>`:`<div class="hint">这是 X 帖子的配图，要删去 X 那条帖子里删。</div>`}
     <div style="height:20px"></div>`;
 }
 async function togglePhotoFav(key){
@@ -10735,7 +10750,7 @@ async function delPhoto(key){
 }
 /* ---------- 生图记录：列表 / 详情 / 重生成 / 下载 / 存相册 ---------- */
 let imglog=[], imgDetailId=null;
-const SRC_NAME={chat:'聊天',moment:'朋友圈',lithium:'lithium',gen:'生成页'};
+const SRC_NAME={chat:'聊天',moment:'朋友圈',lithium:'X',gen:'生成页'};
 async function openImgLog(){ imglog=(await dbAll('imglog')).sort((a,b)=>b.at-a.at); goTo('s-imglog',renderImgLog); }
 function renderImgLog(){
   document.getElementById('imglogBody').innerHTML=imglog.length?`
@@ -11189,7 +11204,7 @@ function genPickChar(){
 }
 
 /* ============================================================
-   lithium —— 角色的社交账号（推特样式）
+   X —— 角色的社交账号（推特样式）
    ============================================================ */
 let liTab='posts';
 /* 「2小时前」这类相对时间 → 绝对时间戳；base 是这段文字写下的时刻 */
@@ -11230,6 +11245,8 @@ function liBackfill(L){
     for(const x of (L[k]||[])) if(!x.at) x.at=liParseTime(x.time,base);
   return L;
 }
+/* 这个角色在 X 上的账号名：填过的 handle → 编辑角色里的「X 账号」→ 角色名 */
+const liName=L=>{ const c=characters.find(x=>x.id===curCharId)||{}; return (L&&L.handle)||c.xname||c.name||'X'; };
 const liData=c=>({handle:'',bio:'',followers:0,following:0,cover:'',
   posts:[],dms:[],comments:[],at:0,...(c&&c.li||{})});
 
@@ -11270,7 +11287,7 @@ function renderLi(){
       <div class="lipost" data-lp="liPostMenu" data-lpid="${i}" onclick="if(!guard())openPost(${i})">
         <div class="av4">${avatarHTML(c.avatar)}</div>
         <div class="lc">
-          <div class="lh"><b>${esc(L.handle||'lithium')}</b><span>@${esc((L.handle||'lithium').toLowerCase())} · ${esc(liTime(p))}</span></div>
+          <div class="lh"><b>${esc(liName(L))}</b><span>@${esc(String(liName(L)).toLowerCase())} · ${esc(liTime(p))}</span></div>
           ${p.private?`<div class="lipriv">${IC('star',11)}已设为私密</div>`:''}
           <div class="lt">${esc(p.text||'')}</div>
           ${p.img?`<div class="lim"><img src="${esc(p.img)}" onclick="openViewer((characters.find(x=>x.id==='${curCharId}').li.posts[${i}]||{}).img)"></div>`
@@ -11356,7 +11373,7 @@ async function liReadDm(i){
   document.getElementById('sheetSearchWrap').style.display='none';
   document.getElementById('sheetList').innerHTML=(d.msgs||[{from:'them',text:d.last}]).map(m=>
     `<div class="it" style="cursor:default;align-items:flex-start">
-      <b style="flex:0 0 auto;color:${m.from==='me'?'var(--accent)':'var(--sub)'}">${m.from==='me'?'lithium':esc(d.who)}</b>
+      <b style="flex:0 0 auto;color:${m.from==='me'?'var(--accent)':'var(--sub)'}">${m.from==='me'?esc(liName(liData(c))):esc(d.who)}</b>
       <span>${esc(m.text)}</span></div>`).join('');
   document.getElementById('sheet').classList.add('open');
   renderLi();
@@ -11499,7 +11516,7 @@ function renderXMe(){
         </div>
       </div>`;
     }).join('')
-    :`<div class="empty"><p>关注的人还没发过东西<br>去 TA 的手机 → lithium 刷新一下，这里就有了</p></div>`}
+    :`<div class="empty"><p>关注的人还没发过东西<br>去 TA 的手机 → X 刷新一下，这里就有了</p></div>`}
     <div style="height:24px"></div>`;
 }
 
@@ -12001,7 +12018,7 @@ async function journalTick(){
 }
 
 /* ---------- 角色用 X 小号主动私信 ----------
-   条件：主聊天安静够久 + 这个角色有 lithium 账号 + 骰子过了。
+   条件：主聊天安静够久 + 这个角色有 X 账号 + 骰子过了。
    角色在私信里是"另一个身份"，认不认得出你由剧情定 */
 let xDmBusy=false;
 async function xDmTick(){
@@ -12233,8 +12250,8 @@ function renderPost(){
   document.getElementById('liPostBody').innerHTML=`
     <div class="lidetail">
       <div class="dh2"><div class="av4">${avatarHTML(c.avatar)}</div>
-        <div><div style="font-weight:700;font-size:15.5px">${esc(L.handle||'lithium')}</div>
-          <div style="font-size:12.5px;color:var(--sub)">@${esc((L.handle||'lithium').toLowerCase())}</div></div></div>
+        <div><div style="font-weight:700;font-size:15.5px">${esc(liName(L))}</div>
+          <div style="font-size:12.5px;color:var(--sub)">@${esc(String(liName(L)).toLowerCase())}</div></div></div>
       ${p.private?`<div class="lipriv">${IC('star',11)}已设为私密</div>`:''}
       <div class="dtx">${esc(p.text||'')}</div>
       ${p.img?`<div class="lim" style="margin-bottom:10px"><img src="${esc(p.img)}"
@@ -12252,7 +12269,7 @@ function renderPost(){
         <div class="av4" style="background:${liColor(x.who)}">${esc((x.who||'?').slice(0,1))}</div>
         <div class="cc"><div class="ch"><b>${esc(x.who)}</b> · ${esc(liTime(x))}</div>
           <div class="cx">${esc(x.text)}</div>
-          ${x.reply?`<div class="cq">lithium 回复：${esc(x.reply)}</div>`:''}</div>
+          ${x.reply?`<div class="cq">${esc(liName(L))} 回复：${esc(x.reply)}</div>`:''}</div>
       </div>`).join('')
       :`<div class="empty"><p>还没拉过评论<br>点右上角「刷新评论」</p></div>`}
     <div style="height:24px"></div>`;
@@ -12266,7 +12283,7 @@ async function loadPostComments(reset){
     const extra=(c.phoneCfg||{}).liPrompt||'';
     const q=`你在模拟一个匿名博主账号的评论区。
 
-博主：${esc0(L.handle||'lithium')}，简介「${esc0(L.bio||'')}」，粉丝 ${L.followers||0}
+博主：${esc0(liName(L))}，简介「${esc0(L.bio||'')}」，粉丝 ${L.followers||0}
 这条帖子：${p.text}${p.private?'（这条已被博主设为私密）':''}
 点赞 ${p.likes||0}，回复 ${p.replies||0}
 ${old&&!reset?`\n已有的评论（不要重复）：\n${old}`:''}
@@ -12329,14 +12346,14 @@ async function loadDmMsgs(){
     const extra=(c.phoneCfg||{}).liPrompt||'';
     const q=`你在模拟一段私信记录。
 
-账号：${esc0(L.handle||'lithium')}，匿名博主，简介「${esc0(L.bio||'')}」
+账号：${esc0(liName(L))}，匿名博主，简介「${esc0(L.bio||'')}」
 人设：${c.bio||'（无）'}
 对方昵称：${d.who}
 已知最后一条：${d.last||''}
 ${extra?`\n## 额外要求\n${extra}`:''}
 
 生成这段私信里最近的 10-14 条消息，按时间从早到晚。要求：
-- 大部分是对方发的，lithium 回得很少、很短、很冷淡（符合"不回私信"的人设）
+- 大部分是对方发的，博主回得很少、很短、很冷淡（符合"不回私信"的人设）
 - 对方的语气要立得住：可能是真心关心的、可能是纠缠的、可能是谈钱的、可能是越界的
 - 每条 5-40 字，像真的私信
 - 不要出现色情露骨的描述，暗示到即可
@@ -12415,7 +12432,7 @@ async function refreshLiUser(){
 }
 
 function liMenu(){
-  actionSheet('lithium',[
+  actionSheet('X',[
     {ic:'edit',t:'账号设置',fn:()=>openPhoneSet()},
     {ic:'sparkle',t:'重新生成关注列表',fn:()=>refreshFollows()},
     {ic:'refresh',t:'刷新账号',fn:()=>refreshLi()}
@@ -12452,11 +12469,11 @@ async function refreshFollows(silent){
   }catch(e){ if(!silent) toast('失败：'+e.message); return false; }
 }
 
-/* 刷新 lithium：第一次生成整份快照；之后每次只生成「这段时间新发生的」，叠在旧内容上面。
+/* 刷新 X：第一次生成整份快照；之后每次只生成「这段时间新发生的」，叠在旧内容上面。
    旧帖、旧评论、旧私信全部保留（图、评论、私密状态都在），不会被刷掉。 */
 async function refreshLi(silent){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
-  if(!silent) toast('正在刷新 lithium…');
+  if(!silent) toast('正在刷新 X…');
   try{
     const ms=(await msgsOf(curCharId)).slice(-14);
     const old=liBackfill(liData(c));
@@ -12568,7 +12585,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
     c.li={
       ...old,
       // 账号名一旦有了就不再随刷新变；bio 按开关
-      handle:(c.xname||old.handle||S1(j.handle)||c.name||'lithium').slice(0,16),
+      handle:(c.xname||old.handle||S1(j.handle)||c.name||'X').slice(0,16),
       bio:(autoChange?S1(j.bio).slice(0,40):'')||old.bio||S1(j.bio).slice(0,40),
       followers:num(j.followers)||old.followers||0, following:num(j.following)||old.following||0,
       posts, comments, dms,
@@ -12620,7 +12637,7 @@ const DEFAULT_PHONE_CFG={liPrompt:'',autoChange:true,wall:''};
 const ICON_COLORS=['#7A68F0','#F5A524','#EC4899','#10B981','#EF4444','#3B82F6',
   '#8B5CF6','#22C55E','#0EA5E9','#F97316','#64748B','#1F2937'];
 const APP_DEFS=[
-  {k:'lithium', n:'lithium', c:'linear-gradient(140deg,#8E7BF8,#5A4FC7)', ic:'moments'},
+  {k:'lithium', n:'X', c:'linear-gradient(140deg,#8E7BF8,#5A4FC7)', ic:'moments'},
   {k:'notes',   n:'备忘录',  c:'#F5A524', ic:'note'},
   {k:'music',   n:'音乐',    c:'#EC4899', ic:'mic'},
   {k:'browser', n:'浏览器',  c:'#10B981', ic:'globe'},
@@ -12660,7 +12677,7 @@ function openPhoneSet(){
     sync:(c.phoneCfg||{}).syncWall===true};
   goTo('s-phoneSet',renderPhoneSet);
 }
-let wallTarget='wall';   // 当前正在编辑哪一块：wall = 手机壁纸，cover = lithium 头图
+let wallTarget='wall';   // 当前正在编辑哪一块：wall = 手机壁纸，cover = X 头图
 function renderPhoneSet(){
   const c=characters.find(x=>x.id===curCharId);
   const pics=[...(c.images||[]),...(c.photos||[]).map(p=>p.src),...((c.li&&c.li.posts)||[]).filter(p=>p.img).map(p=>p.img)];
@@ -12674,7 +12691,7 @@ function renderPhoneSet(){
 
     ${g.sync?'':`<div class="seg" style="margin:0 0 12px">
       <div class="${wallTarget==='wall'?'on':''}" onclick="wallTab('wall')">手机壁纸</div>
-      <div class="${wallTarget==='cover'?'on':''}" onclick="wallTab('cover')">lithium 头图</div>
+      <div class="${wallTarget==='cover'?'on':''}" onclick="wallTab('cover')">X 头图</div>
     </div>`}
 
     ${g.sync
@@ -12685,7 +12702,7 @@ function renderPhoneSet(){
             <div class="gpreview" style="aspect-ratio:2.6;max-height:70px;margin:0">
               ${g.wall?`<img src="${esc(g.wall)}">`:'默认渐变'}</div>
             <div class="hint" style="margin:0;padding:0;font-size:11.5px">
-              上：手机壁纸（竖）<br>下：lithium 头图（横）<br>同一张图裁切方式不同</div>
+              上：手机壁纸（竖）<br>下：X 头图（横）<br>同一张图裁切方式不同</div>
           </div></div>`
       : `<div class="gpreview" style="aspect-ratio:${wallTarget==='cover'?'2.6':'.62'};max-height:${wallTarget==='cover'?'150':'220'}px">
           ${cur?`<img src="${esc(cur)}">`:'默认渐变'}</div>`}
@@ -12694,7 +12711,7 @@ function renderPhoneSet(){
       <div class="gallery" style="padding:2px 0 12px">${pics.map((src,i)=>
         `<div class="gcard" style="width:64px;height:100px;${cur===src?'outline:2.5px solid var(--accent);outline-offset:-2px':''}"
           onclick="setWall(${i})"><img src="${esc(src)}" alt=""></div>`).join('')}</div>`
-      :`<div class="hint">相册里还没有图。去 lithium 生成配图、或在「编辑角色」里加图，这里就能选了。</div>`}
+      :`<div class="hint">相册里还没有图。去 X 生成配图、或在「编辑角色」里加图，这里就能选了。</div>`}
     <button class="btn ghost" onclick="uploadWall()">上传一张</button>
     <button class="btn ghost" onclick="genWall()">生成一张</button>
     ${cur?`<button class="btn danger" onclick="setWall(-1)">恢复默认</button>`:''}
@@ -12747,7 +12764,7 @@ function renderPhoneSet(){
         用的是聊天设置里那套「起居注分享」，讲过的不会重复讲。`:''}
       <b>都要软件开着才会跑，也都真的花额度。</b></div>
 
-    <div class="grouptitle">lithium 账号</div>
+    <div class="grouptitle">X 账号</div>
     <div class="group">
       <div class="cell static"><div class="lbl">让 TA 自己折腾账号</div>
         <label class="switch"><input type="checkbox" ${g.autoChange?'checked':''}
@@ -12761,7 +12778,7 @@ function renderPhoneSet(){
       <textarea id="ps-li" style="min-height:100px"
         placeholder="想让这个账号是什么调性就直接写，例如：&#10;评论区多一点催更的&#10;私信里要有让他不舒服的人&#10;帖子风格偏冷淡，不要卖惨">${esc(g.liPrompt)}</textarea>
     </div></div>
-    <div class="hint">这段会追加到生成 lithium 内容的要求里，优先级高于默认。</div>
+    <div class="hint">这段会追加到生成 X 内容的要求里，优先级高于默认。</div>
 
     <button class="btn" onclick="savePhoneSet()">保存</button>
     <div style="height:20px"></div>`;
@@ -12822,13 +12839,13 @@ function setWall(i){
 }
 function uploadWall(){
   const r=draftPhone.sync?9/19.5:(wallTarget==='cover'?3:9/19.5);
-  const t=draftPhone.sync?'背景图（按手机壁纸裁）':(wallTarget==='cover'?'lithium 头图':'手机壁纸');
+  const t=draftPhone.sync?'背景图（按手机壁纸裁）':(wallTarget==='cover'?'X 头图':'手机壁纸');
   pickImage(d=>{ applyWall(d); toast('已更新'); },1400,.82,{ratio:r,title:t});
 }
 function genWall(){
   if(!imgReady()) return toast('先去 设置 → 生图 配一下');
   openGen({charId:curCharId,scene:'',
-    acceptText:draftPhone.sync?'两处都用这张':(wallTarget==='cover'?'用作 lithium 头图':'用作手机壁纸'),
+    acceptText:draftPhone.sync?'两处都用这张':(wallTarget==='cover'?'用作 X 头图':'用作手机壁纸'),
     back:()=>goTo('s-phoneSet',renderPhoneSet),
     onAccept:async(src)=>{ applyWall(src); goTo('s-phoneSet',renderPhoneSet); }});
 }
@@ -12925,7 +12942,7 @@ function extraContext(char){
   if(L&&(L.posts||[]).length){
     const pub=L.posts.filter(x=>!x.private).slice(0,3);
     const pri=L.posts.filter(x=>x.private).length;
-    if(pub.length) s+=`\n\n【你 lithium 账号最近发的】对方可能看到，也可能没看到：\n`
+    if(pub.length) s+=`\n\n【你 X 账号最近发的】对方可能看到，也可能没看到：\n`
       +pub.map(x=>`- ${x.text}（${x.likes||0} 赞）`).join('\n');
     if(pri) s+=`\n（另有 ${pri} 条已设为私密）`;
     const nd=(L.dms||[]).filter(x=>x.unread).length, nc=(L.comments||[]).filter(x=>x.unread).length;
