@@ -1621,7 +1621,7 @@ input[type=range]{accent-color:var(--accent)}
 
     <div class="screen overlay" id="s-chat">
       <div class="navbar">
-        <button class="lead" onclick="closeChat()"><svg width="10" height="17" viewBox="0 0 10 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L1.5 8.5l7 7"/></svg>消息</button>
+        <button class="lead" onclick="closeChat()" aria-label="返回"><svg width="10" height="17" viewBox="0 0 10 17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 1.5L1.5 8.5l7 7"/></svg></button>
         <div class="title"><b id="chatName"></b><em id="chatStatus"></em></div>
         <div class="sp"></div>
         <button id="chatSetBtn" onclick="openChatSet()"><svg width="20" height="5" viewBox="0 0 20 5" fill="currentColor"><circle cx="2.5" cy="2.5" r="2"/><circle cx="10" cy="2.5" r="2"/><circle cx="17.5" cy="2.5" r="2"/></svg></button>
@@ -3503,6 +3503,8 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - 账号名统一走 `liName(L)`：填过的 handle → 编辑角色里的「X 账号」→ 角色名，不再兜底成 lithium。帖子头、详情页、评论区的「博主回复」、私信里的「我」都用它
 - 编辑角色的 X 账号占位符改成「例如：某个网名，留空就用角色名」
 - 内部键名（`k:'lithium'`、`source:'lithium'` 这类存储用的）不动，旧数据不受影响；姬照自己的账号名是她填的 handle，照常显示 lithium
+
+顺带：聊天页顶栏左上角的退出按钮去掉「消息」两个字，只留返回箭头（用户要求）。
 
 ---
 
