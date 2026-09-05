@@ -3205,10 +3205,32 @@ EVE 的原句（解码 0x27e6）就一行：
 - 文件来的 vibe 信息提取不是随便调的：编码是按某一档 `information_extracted` 算出来的。`vibeInfoOptions` 把文件里各模型带的档位列出来做成分段选择；`vibeEncFor` 挑编码时取离设置值最近的那档
 - 长按菜单留着，选中的卡片加描边
 
+### 2026-09-05（十四）· 认「vibe 组」导出文件
+
+用户给了一个真文件 `vibe-group-尝试2-….json`（8 MB）。不是 NovelAI 官方的 bundle，是某个工具导出的「vibe 组」：
+
+```
+{ groups: { 组名: { vibes:[{vibeDataId, strength}] } },
+  vibeData: { id: { identifier:'novelai-vibe-transfer', image(原图 base64), thumbnail, encodings:{ 'v4-5full': { hash: { encoding, params:{information_extracted} } } }, importInfo } },
+  vibePresets: { 中文名: { vibeDataId, model, strength, … } },
+  presetImages: { … } }
+```
+
+里面每个 vibe 的结构和之前猜的 NAI 单文件格式一致，模型键 `v4-5full` 归一化后能对上。加了外层解析：
+
+- `groups → vibeData`：按组名成组，强度用组里那份（0.56 / 0.34 / 0.32 / 0.29），名字优先用 `vibePresets` 里人起的中文名（耳机男1 / 双子星1 / 纯白模糊背景图 / 暗面打光1）
+- 只存缩略图和编码，**原图不存**（单张几百 KB 到 2 MB 的 base64，4 张就把设置撑爆）；4 个 vibe 存下来 300 KB
+- 按 NAI 的 64 位 id 去重，同一个文件导两次不会重复
+- 文件来的 vibe 缺当前模型的编码时**直接跳过**，不再拿缩略图去 `/ai/encode-vibe`——那样又糊又扣点数
+
+用真文件跑了 node 单测：导入 4 个、去重、4.5 模型直接用 4 个编码不打接口、切到 V4 模型时全部跳过并提示。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **格式靠猜，先拿真文件对** → 前一版按印象写的 bundle 格式只对了内层，外层完全不是那回事。用户手里有真导出物的时候，第一步是要来看结构，而不是写完让她试。
+- **导出文件里什么都有，不等于什么都要存** → 8 MB 的文件里 95% 是原图，存进 settings 会让每次保存都卡。按用途挑字段存。
 - **手机上别把功能藏在长按里** → 长按在 iOS 上会和系统菜单打架，用户根本发现不了。可调的参数必须有可见入口，滑块优先于弹窗输数字。
 - **「有没有人」是生图路由的唯一开关** → 主/第二后端、拼不拼角色词、用不用 vibe，全都挂在这一个标记上。凡是产出图片描述的地方（朋友圈、lithium、聊天照片、生成页）都必须把这个标记一起产出来，缺了就只能靠正则猜。
 - **文件里已有的编码别再花钱算一遍** → NAI 的 vibe 文件自带各模型编码，之前一律重新 encode 等于每次多扣点数。外部导出物先看里面有什么，再决定要不要调接口。
@@ -9440,7 +9462,7 @@ function renderImgCfg(){
         <span style="flex:1"></span>
         <button class="mini" onclick="vibeSel=null;renderImgCfg()">收起</button></div>
       </div>`; })()}
-    <div class="hint">「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 文件（自带编码，用的时候不扣点数；bundle 会按文件名成一组，点上面的组名整组开关），也认图片（V4 每次编码要扣点数）。<br>
+    <div class="hint">「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 文件，也认 vibe 组导出的 <b>.json</b>（groups / vibeData 那种）（自带编码，用的时候不扣点数；bundle 会按文件名成一组，点上面的组名整组开关），也认图片（V4 每次编码要扣点数）。<br>
       点卡片展开面板调强度 / 信息提取 / 开关，长按也有菜单。<br>
       <b>只对 nai-diffusion-3 / 4 系列生效</b>，V5 或其他后端会自动跳过，不会报错。
       V4 系列需要反代提供 <code>/ai/encode-vibe</code> 端点，没有的话本次生成会自动不带 vibe。</div>
@@ -9602,8 +9624,14 @@ function fileToDataUrl(file,maxW){
 /* 一条 NAI vibe 对象 -> 我们的记录。thumbnail 只用来看，编码在 enc 里 */
 function vibeFromNai(v,group){
   const ii=v.importInfo||{};
-  return {id:uid(),name:String(v.name||'vibe').slice(0,14),src:v.thumbnail||'',enc:v.encodings||{},
+  // 只留缩略图和编码；原图（几百 KB 到几 MB 的 base64）不存
+  return {id:uid(),nid:String(v.id||''),name:String(v.name||'vibe').slice(0,14),src:v.thumbnail||'',enc:v.encodings||{},
     info:+ii.information_extracted||1,strength:+ii.strength||0.6,on:true,group:group||''};
+}
+/* 往草稿里加一个 vibe，按 NAI 的 id 去重（同一个文件导两次不会重复） */
+function pushVibe(rec){
+  if(rec.nid&&(draftImg.vibes||[]).some(x=>x.nid===rec.nid)) return false;
+  draftImg.vibes.push(rec); return true;
 }
 async function importVibeFiles(inp){
   const files=[...(inp.files||[])]; if(!files.length) return;
@@ -9614,11 +9642,35 @@ async function importVibeFiles(inp){
       if(/\.(naiv4vibe|naiv4vibebundle|json)$/i.test(f.name)){
         const j=JSON.parse(await f.text());
         const base=f.name.replace(/\.(naiv4vibe|naiv4vibebundle|json)$/i,'');
-        if(Array.isArray(j.vibes)){
-          for(const v of j.vibes){ draftImg.vibes.push(vibeFromNai(v,base.slice(0,12))); n++; }
+        let dup=0;
+        if(j.vibeData&&typeof j.vibeData==='object'){
+          // 「vibe 组」导出：groups → vibeData，vibePresets 里有人起的名字
+          const nameOf={};
+          for(const [pn,p] of Object.entries(j.vibePresets||{})) if(p&&p.vibeDataId&&!nameOf[p.vibeDataId]) nameOf[p.vibeDataId]=pn;
+          const groups=Object.entries(j.groups||{});
+          if(groups.length){
+            for(const [gn,gv] of groups){
+              for(const it of ((gv&&gv.vibes)||[])){
+                const v=j.vibeData[it.vibeDataId]; if(!v) continue;
+                const rec=vibeFromNai(v,String(gn).slice(0,12));
+                if(nameOf[it.vibeDataId]) rec.name=String(nameOf[it.vibeDataId]).slice(0,14);
+                if(Number.isFinite(+it.strength)&&+it.strength>0) rec.strength=+it.strength;
+                if(pushVibe(rec)) n++; else dup++;
+              }
+            }
+          }else{
+            for(const [vid,v] of Object.entries(j.vibeData)){
+              const rec=vibeFromNai(v,base.slice(0,12));
+              if(nameOf[vid]) rec.name=String(nameOf[vid]).slice(0,14);
+              if(pushVibe(rec)) n++; else dup++;
+            }
+          }
+        }else if(Array.isArray(j.vibes)){
+          for(const v of j.vibes){ if(pushVibe(vibeFromNai(v,base.slice(0,12)))) n++; else dup++; }
         }else if(j.encodings||j.thumbnail){
-          draftImg.vibes.push(vibeFromNai(j,'')); n++;
+          if(pushVibe(vibeFromNai(j,''))) n++; else dup++;
         }else throw new Error('不是 NovelAI 的 vibe 文件');
+        if(dup) toast(f.name+'：'+dup+' 个已经有了，跳过');
       }else if(/^image\//.test(f.type)){
         const d=await fileToDataUrl(f,640);
         draftImg.vibes.push({id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,10)||'vibe',src:d,info:1,strength:0.6,on:true,group:''});
@@ -9851,7 +9903,8 @@ async function buildVibeParams(g){
     if(isV4){
       const pre=vibeEncFor(v,g.model);
       if(pre){ imgs.push(pre); used.push(v); continue; }
-      if(!v.src){ toast('vibe「'+v.name+'」没有当前模型的编码，已跳过'); continue; }
+      // 文件来的 vibe 只有缩略图，拿它去编码又糊又扣点数：缺当前模型的编码就直接跳过
+      if(!v.src||v.enc){ toast('vibe「'+v.name+'」没有当前模型的编码，已跳过'); continue; }
       // 图片来的 vibe：V4 要先编码（这一步扣点数）；反代没这个端点就跳过 vibe，不要让整张图失败
       try{
         const r=await fetch(g.base.replace(/\/+$/,'')+'/ai/encode-vibe',{
