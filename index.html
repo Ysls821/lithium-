@@ -1020,6 +1020,19 @@ input[type=range]{accent-color:var(--accent)}
   box-shadow:var(--shadow-s);cursor:pointer;border:2.5px solid transparent}
 .vibecard.on{border-color:var(--accent)}
 .vibecard.sel{outline:2px solid var(--accent);outline-offset:2px}
+/* 头像框：叠在头像上；容器放开裁切，头像图自己按容器圆角裁 */
+.avframe{position:absolute;left:50%;top:50%;width:var(--frame-scale,135%);height:var(--frame-scale,135%);
+  transform:translate(-50%,-50%);max-width:none;max-height:none;pointer-events:none;z-index:3;object-fit:contain}
+*:has(> .avframe){position:relative;overflow:visible!important}
+*:has(> .avframe)>img:not(.avframe){border-radius:inherit}
+.framegrid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:2px 0 6px}
+.framecard{background:var(--card);border-radius:13px;padding:8px 4px 6px;text-align:center;font-size:11px;color:var(--sub);
+  box-shadow:var(--shadow-s);cursor:pointer;overflow:hidden}
+.framecard.on{outline:2px solid var(--accent);outline-offset:-2px}
+.framecard .fdemo{width:40px;height:40px;border-radius:50%;background:var(--grad);margin:8px auto 10px}
+.framecard span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frameadd{border-radius:13px;border:1.6px dashed var(--line2);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:4px;color:var(--sub);font-size:11px;cursor:pointer;min-height:76px}
 .vibecard img{width:100%;height:100%;object-fit:cover}
 .vibecard .vibeph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
   background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:16px}
@@ -1906,7 +1919,7 @@ input[type=range]{accent-color:var(--accent)}
 
 `characters.chat` 是每个角色独立的聊天设置：气泡色、字号、背景、沉浸开关、历史条数、主动发消息、注入管理器开关。
 
-**DB 版本历史**：v1 基础 → v2 加 memories → v3 加 personas → v4 加 stickers/diaries/moods → … → v8 加 fonts（自定义字体 Blob）。升级是增量建表，旧数据不动。
+**DB 版本历史**：v1 基础 → v2 加 memories → v3 加 personas → v4 加 stickers/diaries/moods → … → v8 加 fonts（自定义字体 Blob）→ v9 加 frames（头像框）。升级是增量建表，旧数据不动。
 
 ---
 
@@ -3225,10 +3238,23 @@ EVE 的原句（解码 0x27e6）就一行：
 
 用真文件跑了 node 单测：导入 4 个、去重、4.5 模型直接用 4 个编码不打接口、切到 V4 模型时全部跳过并提示。
 
+### 2026-09-05（十五）· 头像框
+
+用户想要头像框，素材是生图软件出的白底圆环图（黑描边、中间空）。
+
+- **存**：`frames` 表（**DB v9**），`{id, name, src}`；备份导出 / 导入带上
+- **上传自动去底** `frameCutout`：从四个角和正中心做泛洪，和左上角底色接近（RGB 距离 < 42）的连通区域变透明；中心那个种子只有颜色和底色一致才启用，落在图案上就不抠；紧挨透明区的浅色像素按距离给半透明，去白边。已经有透明像素的真 PNG 不动。缩到 512px
+- **给谁戴**：`characters.frame` / `personas.frame`，编辑角色 / 编辑身份页头像下面选，预览实时叠上去；草稿暂存和恢复也带着
+- **怎么叠**：`avatarHTML` 拆成 `avatarInner` + `frameSrcFor`。所有画头像的地方都只传了头像图，所以按头像图反查是谁的（角色或身份），有框就在后面追加一张 `<img class="avframe">`。零改调用点，聊天、列表、朋友圈、X、TA 手机全站生效。代价：emoji 头像没有图可查，戴不了框
+- **CSS**：`.avframe` 绝对定位居中、`--frame-scale` 控制大小；`*:has(> .avframe)` 把容器 `overflow` 放开、`position:relative`，头像图 `border-radius:inherit` 自己裁圆。用 `:has` 是为了不去改十几个容器类
+- 设置 → 外观美化 → 头像框：显示开关、大小滑块（105% 到 175%，实时预览）、框库网格（点开改名 / 查看 / 删除，删除会把在用的角色清掉）
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **要改所有调用点时，先想能不能反查** → 头像框需要知道「这是谁的头像」，直接做要改几十处 `avatarHTML(c.avatar)`。头像图本身就是身份，按图反查零改动。副作用（emoji 头像不行）在提示里写明就行。
+- **容器裁切和外溢装饰冲突** → 头像容器全是 `overflow:hidden` 圆角，框要溢出。用 `:has()` 只在有框的容器上放开裁切，头像图改成自己裁，不动没框的地方。
 - **格式靠猜，先拿真文件对** → 前一版按印象写的 bundle 格式只对了内层，外层完全不是那回事。用户手里有真导出物的时候，第一步是要来看结构，而不是写完让她试。
 - **导出文件里什么都有，不等于什么都要存** → 8 MB 的文件里 95% 是原图，存进 settings 会让每次保存都卡。按用途挑字段存。
 - **手机上别把功能藏在长按里** → 长按在 iOS 上会和系统菜单打架，用户根本发现不了。可调的参数必须有可见入口，滑块优先于弹窗输数字。
@@ -3394,7 +3420,7 @@ EVE 的原句（解码 0x27e6）就一行：
    数据全部存在本机浏览器 IndexedDB，不上传任何地方
    ============================================================ */
 
-const DB_NAME='xiaoshouji', DB_VER=8;
+const DB_NAME='xiaoshouji', DB_VER=9;
 let db=null;
 
 const DEFAULT_STYLE=`["在呢", "刚洗完澡", "怎么啦？"]
@@ -3469,6 +3495,7 @@ function openDB(){
         d.createObjectStore('moods',{keyPath:'id'}).createIndex('characterId','characterId');
       if(!d.objectStoreNames.contains('moments')) d.createObjectStore('moments',{keyPath:'id'});
       if(!d.objectStoreNames.contains('fonts')) d.createObjectStore('fonts',{keyPath:'id'});   // v8：自定义字体（存 Blob）
+      if(!d.objectStoreNames.contains('frames')) d.createObjectStore('frames',{keyPath:'id'}); // v9：头像框
       if(!d.objectStoreNames.contains('presets')) d.createObjectStore('presets',{keyPath:'id'});
       if(!d.objectStoreNames.contains('summaries'))
         d.createObjectStore('summaries',{keyPath:'id'}).createIndex('characterId','characterId');
@@ -3566,7 +3593,19 @@ function toast(t){
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),2300);
 }
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const avatarHTML=a=>!a?IC('person',22):(/^(https?:|data:)/.test(a)?`<img src="${esc(a)}" alt="">`:esc(a));
+/* 头像本体（图 / emoji / 占位人形） */
+const avatarInner=a=>!a?IC('person',22):(/^(https?:|data:)/.test(a)?`<img src="${esc(a)}" alt="">`:esc(a));
+/* 头像框：按头像图反查是谁的（角色 / 身份），有框就叠一张。没有头像图的用不了框 */
+function frameSrcFor(a){
+  if(!a||S.frameOn===false||!frames.length||!/^(https?:|data:)/.test(a)) return '';
+  const owner=characters.find(c=>c.frame&&c.avatar===a)||personas.find(p=>p.frame&&p.avatar===a);
+  if(!owner) return '';
+  const f=frames.find(x=>x.id===owner.frame); return f?f.src:'';
+}
+const frameImg=src=>src?`<img class="avframe" src="${esc(src)}" alt="">`:'';
+const avatarHTML=a=>avatarInner(a)+frameImg(frameSrcFor(a));
+/* 编辑页预览用：框还没保存，按草稿画 */
+const avatarWithFrame=(a,fid)=>avatarInner(a)+frameImg(((frames||[]).find(x=>x.id===fid)||{}).src||'');
 function fmtTime(ts){
   const d=new Date(ts),n=new Date();
   const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
@@ -4487,6 +4526,99 @@ const hex2rgb=h=>{h=String(h).replace('#','');
   return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];};
 const rgb2hex=a=>'#'+a.map(x=>Math.max(0,Math.min(255,Math.round(x))).toString(16).padStart(2,'0')).join('');
 const mixTo=(h,t,k)=>rgb2hex(hex2rgb(h).map((v,i)=>v+(t[i]-v)*k));
+/* ---------- 头像框 ---------- */
+let frames=[];
+function applyFrameScale(){
+  document.documentElement.style.setProperty('--frame-scale',(S.frameScale||135)+'%');
+}
+/* 白底 / 纯色底的框图自动抠成透明：从四角和正中心做泛洪，和底色接近的连通区域变透明。
+   已经有透明像素的（真 PNG）不动。 */
+async function frameCutout(src,maxW){
+  const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('图片读不出来')); i.src=src; });
+  const sc=Math.min(1,(maxW||512)/Math.max(img.width,img.height));
+  const w=Math.max(1,Math.round(img.width*sc)), h=Math.max(1,Math.round(img.height*sc));
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+  const id=ctx.getImageData(0,0,w,h), d=id.data, N=w*h;
+  let transparent=0;
+  for(let i=0;i<N;i+=37){ if(d[i*4+3]<250) transparent++; }
+  if(transparent>3) return {src:cv.toDataURL('image/png'),cut:false};
+  const bg=[d[0],d[1],d[2]];
+  const dist2=(i,c)=>{ const dr=d[i*4]-c[0],dg=d[i*4+1]-c[1],db=d[i*4+2]-c[2]; return dr*dr+dg*dg+db*db; };
+  const TH=42*42*3;
+  const visited=new Uint8Array(N);
+  const seeds=[0,w-1,(h-1)*w,(h-1)*w+w-1,(h>>1)*w+(w>>1)];
+  for(const s0 of seeds){
+    if(visited[s0]) continue;
+    // 种子只有和左上角底色接近才当底：中心落在图案上就不从中心抠
+    if(dist2(s0,bg)>TH) continue;
+    const stack=[s0]; visited[s0]=1;
+    while(stack.length){
+      const p=stack.pop(); d[p*4+3]=0;
+      const x=p%w, y=(p/w)|0;
+      if(x>0){ const q=p-1; if(!visited[q]&&dist2(q,bg)<TH){ visited[q]=1; stack.push(q); } }
+      if(x<w-1){ const q=p+1; if(!visited[q]&&dist2(q,bg)<TH){ visited[q]=1; stack.push(q); } }
+      if(y>0){ const q=p-w; if(!visited[q]&&dist2(q,bg)<TH){ visited[q]=1; stack.push(q); } }
+      if(y<h-1){ const q=p+w; if(!visited[q]&&dist2(q,bg)<TH){ visited[q]=1; stack.push(q); } }
+    }
+  }
+  // 边缘羽化：紧挨着透明区、颜色偏底色的像素给半透明，去掉那圈白边
+  const FE=110*110*3;
+  for(let p=0;p<N;p++){
+    if(visited[p]) continue;
+    const x=p%w, y=(p/w)|0;
+    const nearT=(x>0&&visited[p-1])||(x<w-1&&visited[p+1])||(y>0&&visited[p-w])||(y<h-1&&visited[p+w]);
+    if(!nearT) continue;
+    const dd=dist2(p,bg);
+    if(dd<FE) d[p*4+3]=Math.round(255*Math.min(1,dd/FE));
+  }
+  ctx.putImageData(id,0,0);
+  return {src:cv.toDataURL('image/png'),cut:true};
+}
+async function importFrames(inp){
+  const files=[...(inp.files||[])]; inp.value='';
+  let n=0, cut=0;
+  for(const f of files){
+    if(!/^image\//.test(f.type)){ toast(f.name+'：不是图片'); continue; }
+    try{
+      const raw=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(new Error('读不出来')); fr.readAsDataURL(f); });
+      const r=await frameCutout(raw,512);
+      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',src:r.src,at:Date.now()});
+      n++; if(r.cut) cut++;
+    }catch(e){ toast(f.name+'：'+e.message); }
+  }
+  if(!n) return;
+  frames=await dbAll('frames'); renderSettings();
+  toast('加了 '+n+' 个头像框'+(cut?'，'+cut+' 个自动去了底':''));
+}
+function frameMenu(id){
+  const f=frames.find(x=>x.id===id); if(!f) return;
+  const usedBy=[...characters.filter(c=>c.frame===id).map(c=>c.name),...personas.filter(p=>p.frame===id).map(p=>p.name)];
+  actionSheet(f.name+(usedBy.length?'　'+usedBy.join('、')+' 在用':''),[
+    {ic:'edit',t:'改名字',fn:async()=>{ const n=prompt('名字：',f.name); if(n&&n.trim()){ f.name=n.trim().slice(0,12); await dbPut('frames',f); frames=await dbAll('frames'); renderSettings(); } }},
+    {ic:'image',t:'查看',fn:()=>openViewer(f.src)},
+    {ic:'trash',t:'删除',danger:true,fn:async()=>{
+      if(!confirm('删除这个头像框？'+(usedBy.length?'在用它的会变回没有框。':''))) return;
+      await dbDel('frames',id);
+      for(const c of characters) if(c.frame===id){ c.frame=''; await dbPut('characters',c); }
+      for(const p of personas) if(p.frame===id){ p.frame=''; await dbPut('personas',p); }
+      frames=await dbAll('frames'); characters=await dbAll('characters'); personas=await dbAll('personas'); renderSettings();
+    }}
+  ]);
+}
+/* 编辑角色 / 编辑身份里选框 */
+let draftFrame='';
+function chooseFrame(){
+  if(!frames.length) return toast('先去 设置 → 外观美化 → 头像框 上传');
+  actionSheet('头像框',[{t:'无',cur:!draftFrame,fn:()=>setDraftFrame('')},
+    ...frames.map(f=>({t:f.name,cur:draftFrame===f.id,fn:()=>setDraftFrame(f.id)}))]);
+}
+function setDraftFrame(id){
+  draftFrame=id||'';
+  const v=document.getElementById('frameVal'); if(v) v.textContent=(frames.find(x=>x.id===draftFrame)||{}).name||'无';
+  const pv=document.getElementById('avPreview'); if(pv) pv.innerHTML=avatarWithFrame(draftAvatar,draftFrame);
+}
+
 /* ---------- 字体：文件 / CSS 链接，都缓存进 IndexedDB，之后不联网、不挂梯子也能显示 ---------- */
 let fonts=[];
 const DEFAULT_FONT_STACK='-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif';
@@ -5016,18 +5148,20 @@ function renderCharsScreen(){
 function editChar(id){
   editingCharId=id;
   const c=id?characters.find(x=>x.id===id):{name:'',avatar:'',bio:'',greeting:'',worldbookIds:[],images:[],personaId:personas[0]?.id||''};
-  draftAvatar=c.avatar||''; draftImages=[...(c.images||[])];
+  draftAvatar=c.avatar||''; draftImages=[...(c.images||[])]; draftFrame=c.frame||'';
   draftPersonaId=c.personaId||personas[0]?.id||'';
   document.getElementById('charEditTitle').textContent=id?'编辑角色':'新建角色';
   document.getElementById('charEditBody').innerHTML=`
     <div class="avpick">
-      <div class="avbig" id="avPreview" onclick="chooseAvatar('char')">${avatarHTML(draftAvatar)}</div>
+      <div class="avbig" id="avPreview" onclick="chooseAvatar('char')">${avatarWithFrame(draftAvatar,draftFrame)}</div>
       <div class="acts">
         <button class="mini" onclick="chooseAvatar('char')">上传图片</button>
         <button class="mini" onclick="setEmojiAvatar('char')">用 emoji</button>
         ${draftAvatar?`<button class="mini" onclick="clearAvatar('char')">清除</button>`:''}
       </div>
     </div>
+    ${frames.length?`<div class="group"><div class="cell" onclick="chooseFrame()"><div class="lbl">头像框</div>
+      <div class="val" id="frameVal">${esc((frames.find(f=>f.id===draftFrame)||{}).name||'无')}</div>${CHEV}</div></div>`:''}
 
     <div class="group">
       <div class="field"><label>名字</label><input id="f-name" value="${esc(c.name)}" placeholder="角色名"></div>
@@ -5090,7 +5224,7 @@ function stashChar(){
     bio:document.getElementById('f-bio').value,
     greeting:document.getElementById('f-greeting').value,
     wbs:[...document.querySelectorAll('#f-wbs .chip.on')].map(e=>e.dataset.id),
-    avatar:draftAvatar, images:[...draftImages], personaId:draftPersonaId};
+    avatar:draftAvatar, images:[...draftImages], personaId:draftPersonaId, frame:draftFrame};
 }
 function restoreChar(extraWb){
   if(!charStash) return false;
@@ -5099,8 +5233,9 @@ function restoreChar(extraWb){
   document.getElementById('f-name').value=st.name;
   document.getElementById('f-bio').value=st.bio;
   document.getElementById('f-greeting').value=st.greeting;
-  draftAvatar=st.avatar; draftImages=[...st.images]; draftPersonaId=st.personaId;
-  document.getElementById('avPreview').innerHTML=avatarHTML(draftAvatar);
+  draftAvatar=st.avatar; draftImages=[...st.images]; draftPersonaId=st.personaId; draftFrame=st.frame||'';
+  document.getElementById('avPreview').innerHTML=avatarWithFrame(draftAvatar,draftFrame);
+  const fv=document.getElementById('frameVal'); if(fv) fv.textContent=(frames.find(x=>x.id===draftFrame)||{}).name||'无';
   const pv=document.getElementById('personaVal');
   if(pv) pv.textContent=personas.find(p=>p.id===draftPersonaId)?.name||'（还没有身份）';
   renderGallery();
@@ -5200,6 +5335,7 @@ async function saveChar(){
     id:editingCharId||uid(), name, avatar:draftAvatar,
     bio:document.getElementById('f-bio').value,
     xname:((document.getElementById('f-xname')||{}).value||'').trim(),
+    frame:draftFrame||'',
     imgPrompt:(document.getElementById('f-imgp')||{}).value||'',
     imgNegative:(document.getElementById('f-imgn')||{}).value||'',
     greeting:document.getElementById('f-greeting').value,
@@ -5224,18 +5360,20 @@ async function delChar(id){
 function editPersona(id){
   editingUserId=id;
   const p=id?personas.find(x=>x.id===id):{name:'',avatar:'',persona:''};
-  draftAvatar=p.avatar||'';
+  draftAvatar=p.avatar||''; draftFrame=p.frame||'';
   const used=id?characters.filter(c=>c.personaId===id).length:0;
   document.getElementById('userEditTitle').textContent=id?'编辑身份':'新建身份';
   document.getElementById('userEditBody').innerHTML=`
     <div class="avpick">
-      <div class="avbig" id="avPreview" onclick="chooseAvatar('user')">${avatarHTML(draftAvatar)}</div>
+      <div class="avbig" id="avPreview" onclick="chooseAvatar('user')">${avatarWithFrame(draftAvatar,draftFrame)}</div>
       <div class="acts">
         <button class="mini" onclick="chooseAvatar('user')">上传图片</button>
         <button class="mini" onclick="setEmojiAvatar('user')">用 emoji</button>
         ${draftAvatar?`<button class="mini" onclick="clearAvatar('user')">清除</button>`:''}
       </div>
     </div>
+    ${frames.length?`<div class="group"><div class="cell" onclick="chooseFrame()"><div class="lbl">头像框</div>
+      <div class="val" id="frameVal">${esc((frames.find(f=>f.id===draftFrame)||{}).name||'无')}</div>${CHEV}</div></div>`:''}
     <div class="group"><div class="field"><label>名字　角色会这样称呼你</label>
       <input id="u-name" value="${esc(p.name)}" placeholder="例如：小刘"></div>
       <div class="cell static"><div class="lbl">性别　角色对你的人称以此为准</div>
@@ -5260,7 +5398,7 @@ async function savePersona(){
   const name=document.getElementById('u-name').value.trim();
   if(!name) return toast('名字不能为空');
   const old=editingUserId?personas.find(x=>x.id===editingUserId):null;
-  const p={id:editingUserId||uid(), name, avatar:draftAvatar,
+  const p={...(old||{}), id:editingUserId||uid(), name, avatar:draftAvatar, frame:draftFrame||'',
     persona:document.getElementById('u-persona').value,
     gender:document.getElementById('u-gender').value||'',
     createdAt:old?old.createdAt:Date.now()};
@@ -6132,6 +6270,25 @@ function renderSettings(){
       CSS 链接会把里面的字体文件全部下载缓存（Google Fonts 的中文字体是几十个小文件，等它跑完）；对方不允许跨域下载时退回在线引用。
       中文字体一般 5-20 MB，只存一次。字体不随「导出全部数据」走，换设备要重新导。</div>
 
+    <div class="grouptitle">头像框</div>
+    <div class="group">
+      <div class="cell static"><div class="lbl">显示头像框</div>
+        <label class="switch"><input type="checkbox" ${S.frameOn!==false?'checked':''}
+          onchange="S.frameOn=this.checked;dbPut('settings',S);renderSettings()"><i></i></label></div>
+      <div class="field"><label>框的大小　<b id="fs-val">${S.frameScale||135}%</b>　不同来源的框留白不一样，自己对一下</label>
+        <input type="range" min="105" max="175" step="5" value="${S.frameScale||135}"
+          oninput="document.getElementById('fs-val').textContent=this.value+'%';document.documentElement.style.setProperty('--frame-scale',this.value+'%')"
+          onchange="S.frameScale=+this.value;dbPut('settings',S)"></div>
+    </div>
+    <div class="framegrid">${frames.map(f=>`
+      <div class="framecard" onclick="if(!guard())frameMenu('${f.id}')">
+        <div class="fdemo">${frameImg(f.src)}</div><span>${esc(f.name)}</span></div>`).join('')}
+      <div class="frameadd" onclick="document.getElementById('frameFile').click()">${IC('plus',20)}上传</div>
+    </div>
+    <input type="file" id="frameFile" accept="image/*" multiple style="display:none" onchange="importFrames(this)">
+    <div class="hint">白底或纯色底的图会自动抠成透明（从四角和正中心把底色去掉，元素有描边就不会误伤），真透明的 PNG 直接用。
+      给谁戴：编辑角色 / 编辑身份里选。头像是 emoji 的戴不了框，得用图片头像。</div>
+
     <div class="grouptitle">系统沉浸</div>
     <div class="group">
       ${S.homeBg?`<div class="cell static"><div class="lbl">沉浸模式</div>
@@ -6373,7 +6530,7 @@ function pickModel(m){ document.getElementById('s-model').value=m; closeSheet();
 /* ---------- 导入导出 ---------- */
 async function exportData(){
   const data={version:5,exportedAt:new Date().toISOString(),settings:S,
-    characters,personas,worldbooks,memories,stickers,diaries,moods,moments,
+    characters,personas,worldbooks,memories,stickers,diaries,moods,moments,frames,
     messages:await dbAll('messages')};
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
@@ -6394,6 +6551,7 @@ async function importData(input){
     for(const x of d.diaries||[]) await dbPut('diaries',x);
     for(const x of d.moods||[]) await dbPut('moods',x);
     for(const x of d.moments||[]) await dbPut('moments',x);
+    for(const x of d.frames||[]) await dbPut('frames',x);
     if(d.settings){ d.settings.id='global'; await dbPut('settings',d.settings); S={...DEFAULT_SETTINGS,...d.settings}; }
     await loadAll(); await ensurePersona();
     toast('导入完成'); renderSettings();
@@ -12924,6 +13082,7 @@ async function loadAll(){
   personas=await dbAll('personas');
   stickers=await dbAll('stickers');
   fonts=await dbAll('fonts');
+  frames=await dbAll('frames');
   diaries=await dbAll('diaries');
   moods=await dbAll('moods');
   worldbooks=(await dbAll('worldbooks')).map(normBook);
@@ -12950,7 +13109,7 @@ async function ensurePersona(){
   }
   const saved=await dbGet('settings','global');
   S=saved?{...DEFAULT_SETTINGS,...saved}:{...DEFAULT_SETTINGS};
-  applyTheme(S.accent);
+  applyTheme(S.accent); applyFrameScale();
   await loadAll();
   try{ await applyFont(); }catch(e){ console.warn('字体应用失败',e); }
   await ensurePersona();
