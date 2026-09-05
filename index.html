@@ -1022,7 +1022,7 @@ input[type=range]{accent-color:var(--accent)}
 .vibecard.sel{outline:2px solid var(--accent);outline-offset:2px}
 /* 头像框：叠在头像上；容器放开裁切，头像图自己按容器圆角裁 */
 .avframe{position:absolute!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;
-  width:calc(var(--frame-scale,108%) * var(--fit,1.35))!important;height:calc(var(--frame-scale,108%) * var(--fit,1.35))!important;
+  width:var(--frame-scale,130%)!important;height:var(--frame-scale,130%)!important;
   transform:translate(-50%,-50%)!important;max-width:none!important;max-height:none!important;
   pointer-events:none;z-index:3;object-fit:contain!important;border-radius:0!important}
 *:has(> .avframe){position:relative;overflow:visible!important}
@@ -3305,10 +3305,17 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 没有她的 token 无法在这边复现，这是按最可能的原因做的自适应；如果三种写法都 400，占位卡上的完整报错会指出字段名。
 
+### 2026-09-05（二十）· 头像框改回按外径放，内圈测量作废
+
+用户：现在头像框又太大了。上一版按「内圈正好套住头像」算倍率，两个问题：一是她的框内圈里有装饰（猫、十字、文字线）伸向中心，从圆心量到的最近像素是装饰不是环，倍率虚高；二是就算量准，环的洞只占外径六成时，硬要洞套住头像，框就得放到头像近两倍，本来就会显得大。
+
+改法：只保留「裁掉透明边」这一步（这才是之前「比头像小」的真正原因），框的**外径**按头像的固定倍数放，默认 130%，滑块 100–180。装饰压住头像边缘一点是正常的。`fit` 还存着但不再参与显示。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「适配」别追求几何上的精确** → 装饰框的洞和外径没有固定比例，按洞对齐会把框放到离谱。用户要的是「框看起来和头像配套」，外径按固定倍数 + 一个滑块就够，几何精确反而错。
 - **报错只截 120 字等于没报** → 「Validation error: error val…」后面才是字段名，截掉就只剩猜。接口原文至少留 500 字，展示的地方放不下就存起来点开看。
 - **参数写法拿不准就做成可退让的** → 第三方接口的校验规则文档不全时，与其赌一种写法，不如按可能性排好几种，400 就退到下一种，成功的记住。代价是最多多一两次请求，换来不用等用户回报。
 - **「参考哪些」和「有哪些」要分开存** → vibe 的 on/off 挂在库项上，等于全局只有一套开关，换场景就得一个个点。参考集合应该是独立对象（组），库只管存。
@@ -4593,8 +4600,8 @@ const rgb2hex=a=>'#'+a.map(x=>Math.max(0,Math.min(255,Math.round(x))).toString(1
 const mixTo=(h,t,k)=>rgb2hex(hex2rgb(h).map((v,i)=>v+(t[i]-v)*k));
 /* ---------- 头像框 ---------- */
 let frames=[];
-/* 100% = 框的内圈正好等于头像；默认 108% 让环压住头像边缘一点。老默认值 135 是没有自动适配时的，当成没设过 */
-const frameScaleVal=()=>(S.frameScale&&S.frameScale!==135)?+S.frameScale:108;
+/* 框的外径 = 头像 × 这个倍数（框图已经裁掉透明边）。默认 130%；108 / 135 是前两版的默认值，当成没设过 */
+const frameScaleVal=()=>(S.frameScale&&S.frameScale!==135&&S.frameScale!==108)?+S.frameScale:130;
 function applyFrameScale(){
   document.documentElement.style.setProperty('--frame-scale',frameScaleVal()+'%');
 }
@@ -6376,8 +6383,8 @@ function renderSettings(){
       <div class="cell static"><div class="lbl">显示头像框</div>
         <label class="switch"><input type="checkbox" ${S.frameOn!==false?'checked':''}
           onchange="S.frameOn=this.checked;dbPut('settings',S);renderSettings()"><i></i></label></div>
-      <div class="field"><label>框的大小　<b id="fs-val">${frameScaleVal()}%</b>　100% = 内圈正好套住头像，往右框往外扩</label>
-        <input type="range" min="80" max="150" step="2" value="${frameScaleVal()}"
+      <div class="field"><label>框的大小　<b id="fs-val">${frameScaleVal()}%</b>　框的外径相对头像的倍数</label>
+        <input type="range" min="100" max="180" step="2" value="${frameScaleVal()}"
           oninput="document.getElementById('fs-val').textContent=this.value+'%';document.documentElement.style.setProperty('--frame-scale',this.value+'%')"
           onchange="S.frameScale=+this.value;dbPut('settings',S)"></div>
     </div>
@@ -6387,7 +6394,7 @@ function renderSettings(){
       <div class="frameadd" onclick="document.getElementById('frameFile').click()">${IC('plus',20)}上传</div>
     </div>
     <input type="file" id="frameFile" accept="image/*" multiple style="display:none" onchange="importFrames(this)">
-    <div class="hint">上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边、量出内圈大小——不管原图留白多少，内圈都会正好套住头像。
+    <div class="hint">上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边。框的外径按头像的倍数放，装饰压住头像边缘一点是正常的。
       给谁戴：编辑角色 / 编辑身份里选。头像是 emoji 的戴不了框，得用图片头像。</div>
 
     <div class="grouptitle">系统沉浸</div>
