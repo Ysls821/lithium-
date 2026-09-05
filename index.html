@@ -1035,6 +1035,11 @@ input[type=range]{accent-color:var(--accent)}
 .framecard span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .frameadd{border-radius:13px;border:1.6px dashed var(--line2);display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:4px;color:var(--sub);font-size:11px;cursor:pointer;min-height:76px}
+.imglog-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:2px 0 6px}
+.imglog-grid .it2{position:relative;aspect-ratio:.75;border-radius:9px;overflow:hidden;background:var(--card);cursor:pointer}
+.imglog-grid .it2 img{width:100%;height:100%;object-fit:cover;display:block}
+.imglog-grid .it2 .tag{position:absolute;left:5px;top:5px;font-size:9.5px;padding:1px 5px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff}
+.imgdetail-img{width:100%;border-radius:12px;display:block;cursor:zoom-in;box-shadow:var(--shadow-s)}
 .vibecard img{width:100%;height:100%;object-fit:cover}
 .vibecard .vibeph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
   background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:16px}
@@ -1664,6 +1669,17 @@ input[type=range]{accent-color:var(--accent)}
       <div class="body pad" id="imgsetBody"></div>
     </div>
 
+    <div class="screen overlay" id="s-imglog">
+      <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>生图记录</b></div>
+        <div class="sp"></div><button onclick="imgLogMenu()">···</button></div>
+      <div class="body pad" id="imglogBody"></div>
+    </div>
+    <div class="screen overlay" id="s-imgdetail">
+      <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>这张图</b></div>
+        <div class="sp"></div></div>
+      <div class="body pad" id="imgdetailBody"></div>
+    </div>
+
     <div class="screen overlay" id="s-gen">
       <div class="navbar"><button onclick="closeGen()">返回</button><div class="title"><b>生成图片</b></div>
         <div class="sp"></div><button onclick="doGenerate()">生成</button></div>
@@ -1921,7 +1937,7 @@ input[type=range]{accent-color:var(--accent)}
 
 `characters.chat` 是每个角色独立的聊天设置：气泡色、字号、背景、沉浸开关、历史条数、主动发消息、注入管理器开关。
 
-**DB 版本历史**：v1 基础 → v2 加 memories → v3 加 personas → v4 加 stickers/diaries/moods → … → v8 加 fonts（自定义字体 Blob）→ v9 加 frames（头像框）。升级是增量建表，旧数据不动。
+**DB 版本历史**：v1 基础 → v2 加 memories → v3 加 personas → v4 加 stickers/diaries/moods → … → v8 加 fonts（自定义字体 Blob）→ v9 加 frames（头像框）→ v10 加 imglog（生图记录）。升级是增量建表，旧数据不动。
 
 ---
 
@@ -3364,10 +3380,24 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - 画师串 textarea 的标签写明「只写画师 tag」，顶部提示「负向单独发，不要粘进正向任何一栏」
 - 用户反馈角色提示词「无法点击选中」：改成和画师串一样的预设式——一排角色名点谁选谁（`S.img.selChar`），只显示选中角色的固定词和额外负向；「拼出来会是这样」用选中角色的真实固定词；「试生成一张」按选中角色生；生成页加「画谁」一栏，随时换角色或选「无」。聊天里发照片不看这个，自动用当前角色
 
+### 2026-09-05（二十五）· 能出人物图了；生图记录 + 实时预览 + 聊天图片操作菜单
+
+用户确认这一版终于生出带人物的图。接着提了四条：生成页预览点不开大图；「上一次请求」看着还是旧的；希望上面一边填、下面一边实时看会发什么；要一个生图记录，聊天里的图要能重生成 / 看大图 / 下载 / 存相册。
+
+- **预览点开**：生成页预览图加 `openViewer`
+- **「上一次请求」不刷新**：从「试生成一张」返回设置页走的是 `show('s-imgset')`，没重渲染，面板停在上一次。返回回调改成先 `renderImgCfg()`；标题改成「上一次实际发出的请求　生成后自动更新」
+- **实时预览** `imgPreviewHTML`：「现在会发出去什么」按当前草稿算正向、负向、参数（后端 / 模型 / 尺寸 / 步数 / CFG / 采样器 / 噪声调度）、vibe（哪个组几张）、第二后端；输入框一改 150ms 后重算，只替换 `#imgPreviewBox` 不整页重绘
+- **生图记录** `imglog` 表（**DB v10**，含图，只在打开记录页时加载，不进启动 loadAll，不进备份）：所有入口（聊天照片 / 朋友圈 / lithium / 生成页）走 `generateImage` 包装层，成功即记 `{src, source, charId, msgId, scene, desc, prompt, negative, model, size, steps, cfg, sampler, noise, vibes, vibeMode, artist, charPrompt}`，只留最近 60 张
+- 记录页 `s-imglog`（三列缩略图 + 来源角标）→ 详情页 `s-imgdetail`（大图、当时发出去的每一项、重新生成、下载、存进 TA 的相册、复制正向、删除）。聊天照片的「重新生成」走原消息的占位卡重排队，别的开生成页把画面 tag 和角色带上
+- **聊天里图片长按**：看大图 / 重新生成这张照片 / 看这张的提示词和参数 / 下载图片 / 存进 TA 的相册
+- **下载**：iOS Safari 不认 `download`，改成开大图 + 提示「长按图片 → 存储图像」；桌面直接下
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **从子页返回时要重渲染** → `show()` 只是切屏，数据面板不会自己更新。凡是「子页操作会改父页数据」的返回，回调里都要带一次 render。
+- **每一张生成物都要留下完整配方** → 用户要复盘「这张为什么好 / 为什么坏」，靠记忆不行。生成成功的那一刻把提示词、参数、来源、关联消息全存下来，才能重生成、对比。
 - **先改状态再读表单 = 把旧值写进新槽位** → 凡是「表单 → 草稿」的同步，必须在切换选中项**之前**做完。这个 bug 表现成「预设互相污染」，用户描述是「堆积」，查了很久才对上。
 - **用户贴出实际请求，比任何推理都快** → 前面几轮猜 vibe、猜采样参数都有道理，但真正的问题是一栏填错了内容；「上一次实际发出去的内容」面板一上线，一条消息就定位了。
 - **接第三方模型接口，先拿官方或成熟客户端的默认预设逐项对** → 缺的字段服务端不会报错，只会悄悄按旧行为跑，表现成「图质量差」这种最难归因的问题。凡是有默认预设文件的接口，把它当清单，一项一项核。
@@ -3551,7 +3581,7 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
    数据全部存在本机浏览器 IndexedDB，不上传任何地方
    ============================================================ */
 
-const DB_NAME='xiaoshouji', DB_VER=9;
+const DB_NAME='xiaoshouji', DB_VER=10;
 let db=null;
 
 const DEFAULT_STYLE=`["在呢", "刚洗完澡", "怎么啦？"]
@@ -3627,6 +3657,7 @@ function openDB(){
       if(!d.objectStoreNames.contains('moments')) d.createObjectStore('moments',{keyPath:'id'});
       if(!d.objectStoreNames.contains('fonts')) d.createObjectStore('fonts',{keyPath:'id'});   // v8：自定义字体（存 Blob）
       if(!d.objectStoreNames.contains('frames')) d.createObjectStore('frames',{keyPath:'id'}); // v9：头像框
+      if(!d.objectStoreNames.contains('imglog')) d.createObjectStore('imglog',{keyPath:'id'}); // v10：生图记录（含图，按需加载）
       if(!d.objectStoreNames.contains('presets')) d.createObjectStore('presets',{keyPath:'id'});
       if(!d.objectStoreNames.contains('summaries'))
         d.createObjectStore('summaries',{keyPath:'id'}).createIndex('characterId','characterId');
@@ -6983,6 +7014,17 @@ function msgMenu(id){
       acts.push({ic:'select',t:'拆分',fn:()=>splitMsg(id)});
     if(m.type==='text'&&ms[idx+1]&&ms[idx+1].role===m.role&&ms[idx+1].type==='text')
       acts.push({ic:'quote',t:'和下一条合并',fn:()=>mergeMsg(id)});
+    if(m.type==='image'&&m.meta&&(m.meta.src||m.meta.gen)){
+      if(m.meta.src) acts.push({ic:'image',t:'看大图',fn:()=>openViewer(m.meta.src)});
+      if(m.meta.gen){
+        acts.push({ic:'sparkle',t:'重新生成这张照片',fn:async()=>{ const mm=await dbGet('messages',id); if(!mm) return; mm.meta.pending=true; await dbPut('messages',mm); await renderChat(); genChatImage(id); }});
+        acts.push({ic:'note',t:'看这张的提示词和参数',fn:async()=>{ imglog=(await dbAll('imglog')).sort((a,b)=>b.at-a.at); const r=imglog.find(x=>x.msgId===id); if(r) openImgDetail(r.id); else toast('这张没有记录（是旧版本生成的）'); }});
+      }
+      if(m.meta.src){
+        acts.push({ic:'copy',t:'下载图片',fn:()=>downloadImage(m.meta.src,'小手机_'+fmtDay(m.timestamp).replace('/','-')+'.png')});
+        acts.push({ic:'plus',t:'存进 TA 的相册',fn:async()=>{ await addCharPhoto(curCharId,m.meta.src,m.content||'',m.role==='user'?'user':'chat'); toast('已存进相册'); }});
+      }
+    }
     if(m.role==='assistant'){
       acts.push({ic:'refresh',t:'重新生成这条之后',fn:()=>regenFrom(idx)});
       acts.push({ic:'note',t:'重生成并附加要求',fn:()=>regenWithNote(idx)});
@@ -9415,7 +9457,7 @@ async function mmGenImage(id,silent){
   }
   if(!silent) toast('配图生成中…');
   try{
-    const src=await generateImage(desc,m.self?mmCharOf(m):null);
+    const src=await generateImage(desc,m.self?mmCharOf(m):null,{source:'moment',momentId:id,charId:m.chatId||''});
     const m2=moments.find(x=>x.id===id); if(!m2) return;
     m2.imgDesc=desc; m2.images=[src];
     await dbPut('moments',m2); moments=await dbAll('moments'); renderMoments();
@@ -9743,6 +9785,30 @@ function negMenu(id){
       renderImgCfg(); }}
   ]);
 }
+/* 按当前草稿算「现在会发出去什么」：正向、负向、参数、vibe */
+function imgPreviewHTML(g){
+  const sc=characters.find(x=>x.id===g.selChar);
+  const part={quality:g.quality,artist:(g.artists.find(a=>a.id===g.activeArtist)||{}).text||'',char:sc?(sc.imgPrompt||'（'+sc.name+' 的固定词是空的）'):'【角色固定词】',scene:'【画面 tag】'};
+  const pos=(g.order||'artist,char,scene,quality').split(',').map(k=>(part[k.trim()]||'').trim()).filter(Boolean).join(', ');
+  const neg=[activeNegText(g),sc?(sc.imgNegative||''):'【角色额外负向】'].filter(Boolean).join(', ');
+  const vg=vibeGroupsOf(g), grp=vg.groups.find(x=>x.id===vg.active);
+  const von=grp?(grp.items||[]).filter(i=>i.on!==false).length:0;
+  const g2=(draftImg2||img2Cfg());
+  const line=`${IMG_BACKENDS[g.backend]||g.backend}　${g.model}　${g.w}×${g.h}　${g.steps} 步　CFG ${g.cfg}　${g.backend==='novelai'?g.sampler+'　'+(g.noise||'karras'):''}`;
+  const vline=!g.vibeOn?'关':(grp?`「${grp.name}」${von} 张`:'没有选中的组，等于不带');
+  return `<div class="group" style="padding:8px 12px;font-size:12.5px;line-height:1.55">
+    <div style="color:var(--sub);margin-bottom:2px">正向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(pos)}</div>
+    <div style="color:var(--sub);margin:8px 0 2px">负向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(neg)}</div>
+    <div style="color:var(--sub);margin:8px 0 2px">参数</div><div>${esc(line)}</div>
+    <div style="color:var(--sub);margin:8px 0 2px">vibe</div><div>${esc(vline)}</div>
+    ${g2.on?`<div style="color:var(--sub);margin:8px 0 2px">第二后端</div><div>${esc((IMG_BACKENDS[g2.backend]||g2.backend)+'　'+(g2.model||'（模型没填）'))}　没有人物的图走这里，只发画面 tag</div>`:''}
+  </div>`;
+}
+let _pvT=null;
+function updImgPreview(){
+  clearTimeout(_pvT);
+  _pvT=setTimeout(()=>{ if(!draftImg) return; readImgForm(); const b=document.getElementById('imgPreviewBox'); if(b) b.innerHTML=imgPreviewHTML(draftImg); },150);
+}
 function openImgCfg(){ draftImg=migrateVibeGroups(migrateImgPresets(imgCfg())); draftImg2=img2Cfg(); vibeSel=null; vibeTab='group'; renderImgCfg(); show('s-imgset'); }
 function setImg2(k,v){ readImgForm(); draftImg2[k]=v; renderImgCfg(); }
 function renderImgCfg(){
@@ -9845,14 +9911,9 @@ function renderImgCfg(){
       <br>当前会拼成：<code>${esc((g.order||'').split(',').map(k=>
         ({char:'角色固定词',scene:'画面描述',artist:'画师串',quality:'质量词'})[k.trim()]||k).join(' , '))}</code></div>
 
-    <div class="grouptitle">拼出来会是这样</div>
-    ${(()=>{ const sc=characters.find(x=>x.id===g.selChar);
-      const part={quality:g.quality,artist:(g.artists.find(a=>a.id===g.activeArtist)||{}).text||'',char:sc?(sc.imgPrompt||'（'+sc.name+' 的固定词是空的）'):'【角色固定词】',scene:'【画面 tag】'};
-      const pos=(g.order||'artist,char,scene,quality').split(',').map(k=>(part[k.trim()]||'').trim()).filter(Boolean).join(', ');
-      const neg=[activeNegText(g),sc?(sc.imgNegative||''):'【角色额外负向】'].filter(Boolean).join(', ');
-      return `<div class="group" style="padding:8px 12px;font-size:12.5px;line-height:1.55">
-        <div style="color:var(--sub);margin-bottom:2px">正向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(pos)}</div>
-        <div style="color:var(--sub);margin:8px 0 2px">负向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(neg)}</div></div>`; })()}
+    <div class="grouptitle">现在会发出去什么　实时</div>
+    <div id="imgPreviewBox">${imgPreviewHTML(g)}</div>
+    <div class="hint">上面任何一栏一改，这里立刻跟着变；【画面 tag】是每次生成时由描述转出来的那段。</div>
 
     <div class="grouptitle">负向提示词　${(g.negatives||[]).length} 套　点名字切换</div>
     <div style="padding:2px 2px 6px">
@@ -9954,7 +10015,11 @@ function renderImgCfg(){
         onchange="setImg('autoPost',this.checked)"><i></i></label></div></div>
     <div class="hint">关掉的话帖子只带一段画面描述，长按那条动态 / 帖子再手动生成。每张图都是一次生图请求。</div>
 
-    <div class="grouptitle">上一次实际发给生图接口的内容</div>
+    <div class="grouptitle">生图记录</div>
+    <div class="group"><div class="cell" onclick="openImgLog()"><div class="lbl">所有生成过的图　含提示词和参数</div>${CHEV}</div></div>
+    <div class="hint">聊天里 TA 发的照片、朋友圈 / lithium 配图、生成页出的图都在，点开能看当时发了什么、重新生成、下载、存进 TA 的相册。只留最近 ${IMGLOG_MAX} 张。</div>
+
+    <div class="grouptitle">上一次实际发出的请求　生成后自动更新</div>
     ${(()=>{ const L=lastImgReq||S.lastImg; if(!L) return `<div class="hint">还没生成过。生成一张之后这里会列出实际发出去的每一项，可以对照检查角色固定词、画师串、负向、vibe 有没有带上。</div>`;
       const row=(k,v)=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:.5px solid var(--line)"><b style="flex:0 0 86px;color:var(--sub);font-weight:500">${k}</b><span style="flex:1;min-width:0;word-break:break-word;white-space:pre-wrap">${esc(String(v||'（空）'))}</span></div>`;
       const txt=[`时间：${fmtTime(L.at)}`,`后端：${IMG_BACKENDS[L.backend]||L.backend}${L.second?'（第二后端）':''}　模型：${L.model}　${L.size}　${L.steps} 步　CFG ${L.cfg}`,`角色：${L.charName}`,`角色固定词：${L.charPrompt||'（空）'}`,`画师串：${L.artist||'（空）'}`,`画面 tag：${L.scene}`,`最终正向：${L.prompt}`,`负向：${L.negative||'（空）'}`,`vibe：${L.vibes||'（无）'}${L.vibeMode?'　写法：'+L.vibeMode:''}`,`结果：${L.ok===true?'成功':(L.ok===false?'失败 '+(L.err||''):'未知')}`].join('\n');
@@ -9981,7 +10046,7 @@ function renderImgCfg(){
     <button class="btn" onclick="saveImgCfg()">保存并返回</button>
     <div style="height:20px"></div>`;
   const body=document.getElementById('imgsetBody');
-  body.oninput=e=>{ if(e.target&&/^ig/.test(e.target.id||'')) imgAutosaveSoon(); };
+  body.oninput=e=>{ if(e.target&&/^ig/.test(e.target.id||'')){ imgAutosaveSoon(); updImgPreview(); } };
   imgAutosave();
 }
 function setImg(k,v){ readImgForm(); draftImg[k]=v; renderImgCfg(); }
@@ -10305,7 +10370,7 @@ async function fetchImg2Models(){
 }
 function testImg2(){
   readImgForm(); S.img={...draftImg}; S.img2={...draftImg2};
-  openGen({scene:'rainy street at night, wet asphalt, neon reflections, no people, photo',route:'second',back:()=>show('s-imgset')});
+  openGen({scene:'rainy street at night, wet asphalt, neon reflections, no people, photo',route:'second',back:()=>{ renderImgCfg(); show('s-imgset'); }});
 }
 async function saveImgCfg(){
   readImgForm();
@@ -10478,7 +10543,91 @@ async function buildVibeParams(g){
 
 let lastImgReq=null;   // 上一次实际发出的生图请求（设置 → 生图 → 诊断 里能看）
 function noteImgReq(o){ lastImgReq={at:Date.now(),...o}; try{ S.lastImg={...lastImgReq}; dbPut('settings',S); }catch(e){} }
+/* ---------- 生图记录：列表 / 详情 / 重生成 / 下载 / 存相册 ---------- */
+let imglog=[], imgDetailId=null;
+const SRC_NAME={chat:'聊天',moment:'朋友圈',lithium:'lithium',gen:'生成页'};
+async function openImgLog(){ imglog=(await dbAll('imglog')).sort((a,b)=>b.at-a.at); goTo('s-imglog',renderImgLog); }
+function renderImgLog(){
+  document.getElementById('imglogBody').innerHTML=imglog.length?`
+    <div class="imglog-grid">${imglog.map(r=>`<div class="it2" onclick="openImgDetail('${r.id}')">
+      <img src="${esc(r.src)}" alt=""><span class="tag">${SRC_NAME[r.source]||r.source}${r.charName?' · '+esc(r.charName):''}</span></div>`).join('')}</div>
+    <div class="hint">点开看提示词和参数。只留最近 ${IMGLOG_MAX} 张，右上角可以清空。</div>`
+    :`<div class="empty"><p>还没有生成过图</p></div>`;
+}
+function imgLogMenu(){
+  actionSheet('生图记录',[{ic:'trash',t:'清空全部记录',danger:true,fn:async()=>{
+    if(!confirm('清空全部生图记录？聊天里、相册里的图不受影响。')) return;
+    for(const r of imglog) await dbDel('imglog',r.id); imglog=[]; renderImgLog(); }}]);
+}
+function openImgDetail(id){ imgDetailId=id; goTo('s-imgdetail',renderImgDetail); }
+function renderImgDetail(){
+  const r=imglog.find(x=>x.id===imgDetailId); if(!r) return goBack();
+  const row=(k,v)=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:.5px solid var(--line)"><b style="flex:0 0 74px;color:var(--sub);font-weight:500">${k}</b><span style="flex:1;min-width:0;word-break:break-word;white-space:pre-wrap">${esc(String(v||'（空）'))}</span></div>`;
+  const c=characters.find(x=>x.id===r.charId);
+  document.getElementById('imgdetailBody').innerHTML=`
+    <img class="imgdetail-img" src="${esc(r.src)}" onclick="openViewer(imglog.find(x=>x.id==='${r.id}').src)">
+    <div class="hint" style="margin-top:8px">${esc((SRC_NAME[r.source]||r.source)+(r.charName?' · '+r.charName:'')+' · '+fmtTime(r.at))}</div>
+    <div class="grouptitle">当时发出去的</div>
+    <div class="group" style="padding:4px 12px;font-size:12.5px;line-height:1.5">
+      ${row('后端',(IMG_BACKENDS[r.backend]||r.backend)+(r.second?'（第二后端）':'')+'　'+r.model)}
+      ${row('参数',r.size+'　'+r.steps+' 步　CFG '+r.cfg+(r.sampler?'　'+r.sampler+'　'+r.noise:''))}
+      ${row('画面 tag',r.scene)}
+      ${r.desc?row('中文描述',r.desc):''}
+      ${row('角色固定词',r.charPrompt)}
+      ${row('画师串',r.artist)}
+      ${row('最终正向',r.prompt)}
+      ${row('负向',r.negative)}
+      ${row('vibe',(r.vibes||'（无）')+(r.vibeMode?'　写法：'+r.vibeMode:''))}
+    </div>
+    <button class="btn" onclick="regenFromLog('${r.id}')">重新生成一张</button>
+    <button class="btn ghost" onclick="downloadImage(imglog.find(x=>x.id==='${r.id}').src,'小手机_${fmtDay(r.at).replace('/','-')}.png')">下载到本地</button>
+    ${c?`<button class="btn ghost" onclick="saveLogToAlbum('${r.id}')">存进「${esc(c.name)}」的相册</button>`:''}
+    <button class="btn ghost" onclick="navigator.clipboard?.writeText(imglog.find(x=>x.id==='${r.id}').prompt).then(()=>toast('正向已复制'))">复制最终正向</button>
+    <button class="btn danger" onclick="delImgLog('${r.id}')">删除这条记录</button>
+    <div style="height:20px"></div>`;
+}
+async function delImgLog(id){ if(!confirm('删除这条记录？')) return; await dbDel('imglog',id); imglog=imglog.filter(x=>x.id!==id); goBack(); renderImgLog(); }
+async function saveLogToAlbum(id){ const r=imglog.find(x=>x.id===id); if(!r||!r.charId) return; await addCharPhoto(r.charId,r.src,r.scene.slice(0,40),r.source); toast('已存进相册'); }
+/* 重生成：聊天里的照片走原来那条消息（占位卡 → 后台生成）；别的开生成页，画面 tag 和角色都带上 */
+async function regenFromLog(id){
+  const r=imglog.find(x=>x.id===id); if(!r) return;
+  if(r.source==='chat'&&r.msgId){
+    const m=await dbGet('messages',r.msgId);
+    if(m&&m.meta){ m.meta.pending=true; await dbPut('messages',m); genChatImage(r.msgId); toast('已排队重新生成，回聊天看'); return; }
+  }
+  openGen({charId:r.charId||null,scene:r.scene,back:()=>goTo('s-imgdetail',renderImgDetail)});
+}
+/* 下载：iOS 的 Safari 不认 download，只能开大图让用户长按存 */
+const isIOS=()=>/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+function downloadImage(src,name){
+  if(isIOS()){ openViewer(src); toast('长按图片 → 存储图像'); return; }
+  const a=document.createElement('a'); a.href=src; a.download=name||'image.png'; document.body.appendChild(a); a.click(); a.remove();
+}
+/* 所有生图入口都走这里：真正的请求在 generateImageRaw，成功后把图 + 当时的全部提示词参数记进「生图记录」 */
 async function generateImage(scene,char,opt){
+  opt=opt||{};
+  const src=await generateImageRaw(scene,char,opt);
+  try{ await logImgGen(src,scene,char,opt); }catch(e){ console.warn('生图记录写入失败',e); }
+  return src;
+}
+const IMGLOG_MAX=60;
+async function logImgGen(src,scene,char,opt){
+  const L=lastImgReq||{};
+  const rec={id:uid(),at:Date.now(),src,source:opt.source||'gen',charId:(char&&char.id)||opt.charId||'',charName:char?char.name:'',
+    msgId:opt.msgId||'',momentId:opt.momentId||'',scene:String(scene||''),desc:opt.desc||'',
+    prompt:L.prompt||'',negative:L.negative||'',model:L.model||'',size:L.size||'',steps:L.steps,cfg:L.cfg,
+    sampler:imgCfg().sampler,noise:imgCfg().noise||'karras',backend:L.backend||'',second:!!L.second,
+    vibes:L.vibes||'',vibeMode:L.vibeMode||'',artist:L.artist||'',charPrompt:L.charPrompt||''};
+  await dbPut('imglog',rec);
+  // 只留最近 IMGLOG_MAX 张，老的删掉
+  const all=await dbAll('imglog');
+  if(all.length>IMGLOG_MAX){
+    all.sort((a,b)=>b.at-a.at);
+    for(const x of all.slice(IMGLOG_MAX)) await dbDel('imglog',x.id);
+  }
+  return rec;
+}
+async function generateImageRaw(scene,char,opt){
   opt=opt||{};
   let g=imgCfg();
   // 路由：有人物走主后端；没有人物且第二后端开着走第二后端；opt.route 可强制 main / second
@@ -10775,7 +10924,7 @@ function closeGen(){ const b=genCtx&&genCtx.back; genCtx=null; b?b():show('s-cha
 function renderGen(){
   const c=genCtx.charId?characters.find(x=>x.id===genCtx.charId):null;
   document.getElementById('genBody').innerHTML=`
-    <div class="gpreview">${genCtx.src?`<img src="${esc(genCtx.src)}">`:'还没有图'}
+    <div class="gpreview">${genCtx.src?`<img src="${esc(genCtx.src)}" onclick="openViewer(genCtx.src)" style="cursor:zoom-in">`:'还没有图'}
       ${genCtx.busy?`<div class="load"><span class="spin"></span>生成中…</div>`:''}</div>
     ${img2Cfg().on?`<div class="seg" style="margin:0 0 10px">
       ${[['auto','自动'],['main','主后端'],['second','第二后端']].map(([k,v])=>
@@ -10826,7 +10975,7 @@ async function doGenerate(){
   genCtx.busy=true; renderGen();
   try{
     const c=genCtx.charId?characters.find(x=>x.id===genCtx.charId):null;
-    genCtx.src=await generateImage(genCtx.scene,c,{route:genCtx.route&&genCtx.route!=='auto'?genCtx.route:undefined,noVibe:!!genCtx.noVibe});
+    genCtx.src=await generateImage(genCtx.scene,c,{route:genCtx.route&&genCtx.route!=='auto'?genCtx.route:undefined,noVibe:!!genCtx.noVibe,source:'gen',charId:c?c.id:''});
     genCtx.busy=false; renderGen(); toast('生成好了');
   }catch(e){ genCtx.busy=false; renderGen(); toast('生成失败：'+e.message); }
 }
@@ -10840,7 +10989,7 @@ async function acceptGen(){
 function testGen(){
   readImgForm(); S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
   const c=characters.find(x=>x.id===S.img.selChar);
-  openGen({charId:c?c.id:null,scene:c?'solo, upper body, looking at viewer':'1girl, solo, upper body, looking at viewer',back:()=>show('s-imgset')});
+  openGen({charId:c?c.id:null,scene:c?'solo, upper body, looking at viewer':'1girl, solo, upper body, looking at viewer',back:()=>{ renderImgCfg(); show('s-imgset'); }});
 }
 /* 生成页里换角色（换成谁就拼谁的固定词；「无」= 不拼角色词） */
 function genPickChar(){
@@ -12243,7 +12392,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
     if((imgReady()||img2Ready())&&imgCfg().autoPost!==false){
       for(const np of fresh){
         if(np.private||!np.imgDesc||!imgReadyFor(liPersonOf(np)?1:0)) continue;
-        try{ np.img=await generateImage(np.imgDesc,liPersonOf(np)?c:null); await dbPut('characters',c); characters=await dbAll('characters'); renderLi(); }
+        try{ np.img=await generateImage(np.imgDesc,liPersonOf(np)?c:null,{source:'lithium',charId:c.id}); await dbPut('characters',c); characters=await dbAll('characters'); renderLi(); }
         catch(e){ toast('配图失败：'+e.message); break; }
       }
     }
@@ -12970,7 +13119,7 @@ async function runGenQ(){
         catch(e){ tags=tags||desc; }
         const mt=await dbGet('messages',id); if(mt){ mt.meta={...mt.meta,tags}; await dbPut('messages',mt); }
       }
-      try{ src=await generateImage(tags,person?c:null); }catch(e){ err=String(e&&e.message||e); }
+      try{ src=await generateImage(tags,person?c:null,{source:'chat',msgId:id,charId:c.id,desc}); }catch(e){ err=String(e&&e.message||e); }
       const m2=await dbGet('messages',id); if(!m2) continue;
       m2.meta={...m2.meta,pending:false,tags};
       if(src){ m2.meta.src=src; delete m2.meta.genErr; } else m2.meta.genErr=err.slice(0,600);
