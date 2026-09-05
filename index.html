@@ -81,13 +81,16 @@ body{background:#0A0A0C;color:var(--text);
 .navbar{flex:0 0 auto;height:46px;display:flex;align-items:center;padding:0 8px;background:var(--nav);
   -webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);
   border-bottom:.5px solid var(--line);position:relative;z-index:10}
-.navbar .title{position:absolute;left:0;right:0;text-align:center;font-size:16px;font-weight:600;
+.navbar .title{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:16px;font-weight:600;
   letter-spacing:-.2px;pointer-events:none}
+.navbar .title em:empty{display:none}
 .navbar button{background:none;border:none;color:var(--accent);font:inherit;font-size:16px;
   padding:8px 10px;cursor:pointer;position:relative;z-index:2;border-radius:10px;transition:opacity .15s}
 .navbar button:active{opacity:.45}
 .navbar .sp{flex:1}
 .navbar .lead{display:flex;align-items:center;gap:2px}
+/* 全局界面字号：每个屏幕整体缩放（zoom 会连布局一起缩，百分比宽度照样填满，不会横向溢出） */
+.screen,#sheet,#viewer,#toast{zoom:var(--ui-zoom,1)}
 
 .body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 #phone *{scrollbar-width:thin;scrollbar-color:rgba(125,125,145,.3) transparent}
@@ -3410,10 +3413,20 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 `msgMenu` 里 `type==='image'` 单独一支：看大图 / 重新生成这张（生成中会提示等一下）/ 提示词和参数（从生图记录找，找不到就把画面 tag 弹出来）/ 复制画面 tag / 下载到本地 / 存进 TA 的相册 / 引用回复 / 撤回（角色发的）/ 删除。不再出现引用之外的通用项（编辑、拆分、合并、贴表情、收藏、心声、存记忆、多选）。标题写「xx 的图片」。
 
+### 2026-09-05（二十八）· 顶栏标题居中 / 全局界面字号 / 清掉排查用功能
+
+用户三条：聊天页顶栏的角色名比两边按钮高；要一个全局字号；把检测浏览器底栏那类排查功能清掉（别删要用的）。
+
+- **顶栏**：`.navbar .title` 是绝对定位但没写 `top`，一直贴着顶边；副标题 `em` 空着也占 12px，角色名就被顶得更高。加 `top:50%;transform:translateY(-50%)`，`em:empty` 不显示。所有页面的标题一起居中了
+- **全局界面字号**：设置 → 外观美化 → 字体 → 「界面字号」85%–130%。做法是 `.screen, #sheet, #viewer, #toast { zoom: var(--ui-zoom) }`——先在线上试了三种：`#phone` 整体 zoom 会把百分比高度算乱，`html` 改 font-size 对 px 单位没用，给每个 `.screen` 加 zoom 最干净：布局跟着一起缩，百分比宽度照样填满，不横向溢出，机身框不动。聊天气泡字号仍在聊天设置里单独调
+- **清理**：删掉「键盘诊断」入口和 `kbDiag`、「底色排查」（红色底色探针 `toggleBgProbe`）、聊天设置里的「聊天页极简（排查用）」和 `chatBare`。这些是 8 月底修键盘缝隙时的排查工具，问题早修完了。保留「键盘适配」三档，那个是功能
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **绝对定位的标题要显式垂直居中** → 只给 left/right 不给 top，元素停在文档流位置（顶边），副标题空着还占位，看起来就是「浮起来」。
+- **排查工具修完问题要撤** → 诊断入口留在设置页里，用户会以为那是功能，也会误点。修完就删，日志里有记录就够。
 - **不同类型的消息共用一个菜单，等于每种都塞满不相干的项** → 消息类型一多，菜单按类型分支，每支只放该类型说得通的操作。
 - **报错里原样贴模型的话，用户会当成角色说的** → 把上游模型的文本回复放进错误提示时，必须先说明「这不是角色」。同样的文字放在不同位置，含义完全不同。
 - **先在线上复现再下结论** → 这条链路完整跑了一遍，确认代码没往聊天里写东西，才敢说问题在配置。
@@ -3998,51 +4011,6 @@ function initKeyboardFix(){
     window.addEventListener(ev,()=>{ setTimeout(apply,120); setTimeout(apply,400); }));
   apply();
 }
-/* 键盘对不上时用这个看真实数值，省得靠猜。
-   注意：这个入口在设置页，点的时候键盘一定是关的 —— 所以关键是 kbLog 里
-   自动记下的历史，里面才有键盘弹起那一刻的数 */
-/* 聊天页出现说不清的线条/色块时，一键把所有叠加层关掉，逐个排除 */
-function chatBare(){
-  const p=document.getElementById('phone');
-  const on=!p.classList.contains('bare');
-  p.classList.toggle('bare',on);
-  if(on){ // 顺手停掉天气和 WebGL 玻璃，它们也可能在聊天页留下渲染痕迹
-    if(typeof wxRaf!=='undefined'&&wxRaf){ cancelAnimationFrame(wxRaf); wxRaf=0; }
-    p.classList.remove('wxon');
-    if(typeof lgTeardown==='function') lgTeardown();
-  } else if(typeof wxSync==='function') wxSync();
-  toast(on?'已关掉所有叠加层，看线还在不在':'恢复了');
-}
-function kbDiag(){
-  const vv=window.visualViewport;
-  const p=document.getElementById('phone').getBoundingClientRect();
-  const now={...kbInfo, phoneH:Math.round(p.height),
-    kbup:document.getElementById('phone').classList.contains('kbup')};
-  // 记录里 vv 最小的那条，就是键盘顶得最高的时候
-  const low=kbLog.length?kbLog.reduce((a,b)=>b.vv<a.vv?b:a):null;
-  const lines=[
-    '模式: '+(S.kbMode||'auto')+'　接管: '+(kbInfo.act||'-'),
-    '',
-    '【当前 · 键盘关着】',
-    Object.entries(now).map(([k,v])=>'  '+k+': '+v).join('\n'),
-    '',
-    '【视口变化记录 '+kbLog.length+' 条】',
-    kbLog.length?kbLog.map(x=>`  ${x.at}  layout=${x.layout} vv=${x.vv} off=${x.off} kb=${x.kb} [${x.act||'-'}]`).join('\n')
-      :'  （还没记到 —— 先去聊天页点一下输入框把键盘调出来，再回来点这里）',
-    '',
-    low&&low.vv<now.vv-40
-      ? `【结论】键盘顶起时 vv=${low.vv}、layout=${low.layout}、算出 kb=${low.kb}\n`+
-        (low.kb<=80
-          ? '  → 布局视口跟着一起变矮了，说明浏览器自己会处理，本程序没有介入。正确。'
-          : '  → 布局视口没变矮，由本程序把机身压到了可视高度。')
-      : '【结论】还没记录到键盘弹起 —— 去聊天页点开输入框，等键盘完全弹出，再回来点这里。',
-    '',
-    'ua: '+navigator.userAgent.slice(0,110)
-  ].join('\n');
-  try{ navigator.clipboard&&navigator.clipboard.writeText(lines); }catch(e){}
-  alert('键盘诊断（已复制）\n\n'+lines);
-}
-
 /* ---------- 长按 ---------- */
 let lpTimer=null, lpFired=false, lpX=0, lpY=0;
 document.addEventListener('pointerdown',e=>{
@@ -4718,6 +4686,7 @@ const mixTo=(h,t,k)=>rgb2hex(hex2rgb(h).map((v,i)=>v+(t[i]-v)*k));
 let frames=[];
 /* 框的外径 = 头像 × 这个倍数（框图已经裁掉透明边）。默认 130%；108 / 135 是前两版的默认值，当成没设过 */
 const frameScaleVal=()=>(S.frameScale&&S.frameScale!==135&&S.frameScale!==108)?+S.frameScale:130;
+function applyUiScale(){ document.documentElement.style.setProperty('--ui-zoom',String((+S.uiScale||100)/100)); }
 function applyFrameScale(){
   document.documentElement.style.setProperty('--frame-scale',frameScaleVal()+'%');
 }
@@ -5039,17 +5008,6 @@ async function setWeather(m){
 /* 决定性判定：把页面底色刷成红色。
    键盘上方那条要是跟着变红 → 是本页面的空白，我能修；
    还是绿的 → 那块由浏览器或键盘自己绘制，网页侧碰不到 */
-let bgProbeOn=false;
-function toggleBgProbe(){
-  bgProbeOn=!bgProbeOn;
-  document.documentElement.style.background=bgProbeOn?'#FF0033':'';
-  document.body.style.background=bgProbeOn?'#FF0033':'';
-  document.getElementById('phone').style.background=bgProbeOn?'#FF0033':'';
-  renderSettings();
-  toast(bgProbeOn
-    ?'底色已改成红色。去聊天页点开输入框看那条颜色'
-    :'已恢复');
-}
 async function setKbMode(m){
   S.kbMode=m; await dbPut('settings',S);
   const p=document.getElementById('phone');
@@ -6435,22 +6393,8 @@ function renderSettings(){
         <label class="switch"><input type="checkbox" id="s-showlog" ${S.showLog?'checked':''}
           onchange="S.showLog=this.checked;renderSettings()"><i></i></label></div>
       ${S.showLog?`<div class="cell" onclick="openLog()"><div class="lbl">开发日志</div>
-        <div class="val">${logStats()}</div>${CHEV}</div>
-      <div class="cell" onclick="kbDiag()"><div class="lbl">键盘诊断</div>
-        <div class="val">排版对不上时用</div>${CHEV}</div>`:''}
+        <div class="val">${logStats()}</div>${CHEV}</div>`:''}
     </div>
-
-    <div class="grouptitle">底色排查</div>
-    <div class="group"><div class="cell static">
-      <div class="main" style="flex:1;min-width:0"><div class="lbl">把页面底色刷成红色</div>
-        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">用完记得关掉</div></div>
-      <label class="switch"><input type="checkbox" ${bgProbeOn?'checked':''}
-        onchange="toggleBgProbe()"><i></i></label></div>
-    </div>
-    <div class="hint">键盘上方那条颜色到底是谁画的，一试就知道：<br>
-      开了之后去聊天页点开输入框——<b>那条跟着变红</b>＝是本页面的空白，能修；
-      <b>还是原来的颜色</b>＝那块由浏览器或输入法自己绘制，网页侧碰不到，
-      换个浏览器或者把本站「添加到主屏幕」用独立窗口打开就没有了。</div>
 
     <div class="grouptitle">键盘适配</div>
     <div class="group"><div class="field"><div class="seg">
@@ -6501,6 +6445,11 @@ function renderSettings(){
       <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" multiple style="display:none" onchange="importFontFiles(this)">
       <div class="cell" onclick="addFontCss()"><div class="lbl">添加 CSS 链接 / 字体直链</div>${CHEV}</div>
     </div>
+    <div class="group"><div class="field"><label>界面字号　<b id="ui-val">${+S.uiScale||100}%</b>　整个界面一起放大缩小</label>
+      <input type="range" min="85" max="130" step="5" value="${+S.uiScale||100}"
+        oninput="document.getElementById('ui-val').textContent=this.value+'%';document.documentElement.style.setProperty('--ui-zoom',String(this.value/100))"
+        onchange="S.uiScale=+this.value;dbPut('settings',S)"></div></div>
+    <div class="hint">聊天气泡的字号在聊天设置里另外调，这里是所有页面一起变。</div>
     <div class="hint">文件和链接里的字体都会存进这台设备的浏览器，之后不联网、不挂梯子也能显示。
       CSS 链接会把里面的字体文件全部下载缓存（Google Fonts 的中文字体是几十个小文件，等它跑完）；对方不允许跨域下载时退回在线引用。
       中文字体一般 5-20 MB，只存一次。字体不随「导出全部数据」走，换设备要重新导。</div>
@@ -7605,10 +7554,6 @@ function renderChatSet(){
     <div class="secband">管理</div>
     <div class="grouptitle">调试</div>
     <div class="group">
-      <div class="cell" onclick="chatBare();show('s-chat');renderChat(false)">
-        <div class="main" style="flex:1;min-width:0"><div class="lbl">聊天页极简（排查用）</div>
-          <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
-            关掉遮罩/阴影/毛玻璃/天气层，看怪线还在不在</div></div>${CHEV}</div>
       <div class="cell static"><div class="lbl">显示注入管理器</div>
         <label class="switch"><input type="checkbox" ${g.showInject?'checked':''}
           onchange="setCfg('showInject',this.checked,true);updateInjectPill()"><i></i></label></div>
@@ -13814,7 +13759,7 @@ async function ensurePersona(){
   }
   const saved=await dbGet('settings','global');
   S=saved?{...DEFAULT_SETTINGS,...saved}:{...DEFAULT_SETTINGS};
-  applyTheme(S.accent); applyFrameScale();
+  applyTheme(S.accent); applyFrameScale(); applyUiScale();
   await loadAll();
   try{ await applyFont(); }catch(e){ console.warn('字体应用失败',e); }
   warmFrames().catch(()=>{});
