@@ -1526,6 +1526,11 @@ input[type=range]{accent-color:var(--accent)}
 .ppitem i{width:56px;height:56px;border-radius:17px;background:var(--card);box-shadow:var(--shadow-s);
   display:flex;align-items:center;justify-content:center;color:var(--accent);transition:transform .16s}
 .ppitem:active i{transform:scale(.9)}
+/* 非沉浸：面板贴底铺满、实色、无阴影（微信那种），不再像一张悬着的卡片；沉浸模式保持玻璃卡片 */
+#phone:not(.imm) #plusPanel{background:var(--bar)}
+#phone:not(.imm) .ppgrid{margin:0;border-radius:0;border:none;border-top:.5px solid var(--line);
+  background:var(--bar);box-shadow:none;padding:16px 10px 22px;
+  -webkit-backdrop-filter:none;backdrop-filter:none}
 #phone.imm #plusPanel{background:transparent}
 #phone.imm .ppgrid{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.22);
   box-shadow:0 10px 32px rgba(0,0,0,.22)}
@@ -3506,10 +3511,19 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 顺带：聊天页顶栏左上角的退出按钮去掉「消息」两个字，只留返回箭头（用户要求）。
 
+### 2026-09-05（三十二）· 非沉浸模式的「+」面板不再像悬着
+
+用户：非沉浸模式下打开左下角的「+」面板，它悬浮着很怪；沉浸模式的不要动。
+
+面板本身在布局流里（撑开输入栏上方），「悬浮感」来自样式：圆角 26px 的卡片、四周留 10px 边、毛玻璃底、大阴影——沉浸模式下压在背景图上好看，放在实色页面上就像一张飘着的卡。
+
+改法：`#phone:not(.imm)` 下面板贴底铺满、直角、实色 `--bar`（和输入栏、顶栏一个色）、无阴影、只留一条顶边线，微信那种；沉浸模式的玻璃卡片原样保留。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **同一套样式不能同时服务「有图」和「没图」** → 玻璃、阴影、留边这些是给叠在图上准备的，实色页面上全是负担。按沉浸 / 非沉浸拆成两套，和顶栏那次是同一个道理。
 - **别拿样例数据当产品名** → 做功能时手边只有一个角色，顺手把她的账号名当成了软件名，一直没人发现。凡是「这个角色的」东西都要和「这个软件的」分开命名。
 - **示范比规则强** → 提示词里写「至少两三条」，历史里却每轮只有一句，模型一定跟历史走。凡是要模型延续的格式，历史里就得按那个格式呈现，不能只靠一句规则。
 - **「只回一条」先看原文再猜** → 模型原始回复没留下来，就分不清是模型少给还是解析合并。任何「输出不对」的问题，第一步都是把原文留下来。
