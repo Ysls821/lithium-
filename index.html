@@ -1032,7 +1032,7 @@ input[type=range]{accent-color:var(--accent)}
 .vibecard.sel{outline:2px solid var(--accent);outline-offset:2px}
 /* 头像框：叠在头像上；容器放开裁切，头像图自己按容器圆角裁 */
 .avframe{position:absolute!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;
-  width:var(--frame-scale,130%)!important;height:var(--frame-scale,130%)!important;
+  width:var(--fscale,var(--frame-scale,130%))!important;height:var(--fscale,var(--frame-scale,130%))!important;
   transform:translate(calc(-50% + var(--fdx,0%)),calc(-50% + var(--fdy,0%)))!important;max-width:none!important;max-height:none!important;
   pointer-events:none;z-index:3;object-fit:contain!important;border-radius:0!important}
 *:has(> .avframe){position:relative;overflow:visible!important}
@@ -1050,6 +1050,7 @@ input[type=range]{accent-color:var(--accent)}
 .imglog-grid .it2 img{width:100%;height:100%;object-fit:cover;display:block}
 .imglog-grid .it2 .tag{position:absolute;left:5px;top:5px;font-size:9.5px;padding:1px 5px;border-radius:5px;background:rgba(0,0,0,.55);color:#fff}
 .imgdetail-img{width:100%;border-radius:12px;display:block;cursor:zoom-in;box-shadow:var(--shadow-s)}
+.imglog-grid .it2 .favb{position:absolute;right:5px;top:3px;color:#FFD54A;font-size:15px;text-shadow:0 1px 2px rgba(0,0,0,.6)}
 .vibecard img{width:100%;height:100%;object-fit:cover}
 .vibecard .vibeph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
   background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:16px}
@@ -1679,6 +1680,18 @@ input[type=range]{accent-color:var(--accent)}
       <div class="body pad" id="imgsetBody"></div>
     </div>
 
+    <div class="screen overlay" id="s-fontdetail">
+      <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>字体</b></div><div class="sp"></div></div>
+      <div class="body pad" id="fontdetailBody"></div>
+    </div>
+    <div class="screen overlay" id="s-album">
+      <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>相册</b></div><div class="sp"></div></div>
+      <div class="body pad" id="albumBody"></div>
+    </div>
+    <div class="screen overlay" id="s-photo">
+      <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>照片</b></div><div class="sp"></div></div>
+      <div class="body pad" id="photoBody"></div>
+    </div>
     <div class="screen overlay" id="s-imglog">
       <div class="navbar"><button onclick="goBack()">返回</button><div class="title"><b>生图记录</b></div>
         <div class="sp"></div><button onclick="imgLogMenu()">···</button></div>
@@ -3441,10 +3454,20 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 **数据的坑**：iOS 上「添加到主屏幕」的 app 和 Safari 是两套存储，Safari 里的聊天记录不会自动出现在 app 里，要先在 Safari 里「导出全部数据」再到 app 里导入。
 
+### 2026-09-05（三十）· 头像框逐个设置 / 字体详情页 / 相册重做
+
+用户装了 PWA 之后提的一批：头像框要能改名、每个框自己的大小和位置、点一个下面出设置；字体要能改名、有二级页看来源；TA 手机的相册要一张张的图，点开能看参数和描述、能删、右上角标 TA 有没有点亮。
+
+- **头像框**：设置页里点卡片展开 `#framePanel`：名字、大小（80–220%，`frames.scale`，只改这一个）、上下、左右三个滑块、按模板对齐开关、查看 / 归零 / 删除 / 收起，显示谁在用。滑块拖动时直接改选中卡片里那张框的 CSS 变量，松手 300ms 后存库；聊天页开着就重画。全局「框的大小」滑块删掉，`.avframe` 改用每个框自己的 `--fscale`（没设过的按 130%）。长按菜单保留，删除走同一个 `delFrame`
+- **字体**：列表项点进 `s-fontdetail` 详情页：用这个字体渲染的预览段、可改的名字、类型 / 来源链接或「本地上传的文件」/ 大小 / 缓存了几个文件 / 状态；按钮：使用 / 停用、复制原链接、删除。列表项右侧留一个「用」快捷键，删除挪进详情页
+- **相册**（TA 的手机 → 相册）：从 actionSheet 换成 `s-album` 三列网格，来源角标（TA 发给你的 / 朋友圈 / lithium / 角色图片 / 你发的），★ 表示 TA 点亮过；点开 `s-photo`：大图、来源时间、当时的说明、「替 TA 点亮 / 取消」、「看参数和当时的描述」（按图内容去生图记录里找，打开详情页）、下载、删除（lithium 配图提示去帖子里删）。`characters.photos[i].fav` 存点亮
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「全局一个滑块」和「每个素材自己调」的取舍** → 素材来源不一的东西（框、vibe）一律按个体存参数，全局值只做默认。上一版全局滑块看着省事，用户第一天就要求拆开。
+- **列表项点击 = 立刻生效，是危险的默认** → 字体列表点一下就切换，用户想看详情却被切了字体。列表点击进详情，快捷动作放右侧小按钮。
 - **PWA 缺图标等于没做** → 没有 192 / 512 图标，Android 不给安装提示，iOS 用截图当图标。manifest 里的图标必须是真文件路径，data URL 的 manifest 放不了。
 - **独立窗口和浏览器里的状态栏不一样** → 假状态栏在浏览器里是装饰，在 standalone 里会和真的叠在一起。按 display-mode 分开处理。
 - **绝对定位的标题要显式垂直居中** → 只给 left/right 不给 top，元素停在文档流位置（顶边），副标题空着还占位，看起来就是「浮起来」。
@@ -3824,7 +3847,8 @@ function frameSrcFor(a){
 const frameImg=f=>{ if(!f) return '';
   const src=typeof f==='string'?f:((f.mode==='full'&&f.full)?f.full:f.src);
   const dx=(typeof f==='object'&&+f.dx)||0, dy=(typeof f==='object'&&+f.dy)||0;
-  return src?`<img class="avframe" style="--fdx:${dx}%;--fdy:${dy}%" src="${esc(src)}" alt="">`:''; };
+  const sc=(typeof f==='object'&&+f.scale)||130;
+  return src?`<img class="avframe" style="--fscale:${sc}%;--fdx:${dx}%;--fdy:${dy}%" src="${esc(src)}" alt="">`:''; };
 const avatarHTML=a=>avatarInner(a)+frameImg(frameSrcFor(a));
 /* 编辑页预览用：框还没保存，按草稿画 */
 const avatarWithFrame=(a,fid)=>avatarInner(a)+frameImg((frames||[]).find(x=>x.id===fid)||null);
@@ -4823,14 +4847,34 @@ function frameMenu(id){
     {ic:'chev',t:'右移 3%',fn:nudge('dx',3)},
     ...((+f.dx||+f.dy)?[{ic:'refresh',t:'位置归零',fn:async()=>{ f.dx=0; f.dy=0; await save(); frameMenu(id); }}]:[]),
     {ic:'image',t:'查看',fn:()=>openViewer(f.mode==='full'&&f.full?f.full:f.src)},
-    {ic:'trash',t:'删除',danger:true,fn:async()=>{
-      if(!confirm('删除这个头像框？'+(usedBy.length?'在用它的会变回没有框。':''))) return;
-      await dbDel('frames',id);
-      for(const c of characters) if(c.frame===id){ c.frame=''; await dbPut('characters',c); }
-      for(const p of personas) if(p.frame===id){ p.frame=''; await dbPut('personas',p); }
-      frames=await dbAll('frames'); characters=await dbAll('characters'); personas=await dbAll('personas'); renderSettings();
-    }}
+    {ic:'trash',t:'删除',danger:true,fn:()=>delFrame(id)}
   ]);
+}
+/* 设置页里：点卡片展开这一个框的设置；改了就存，预览实时跟 */
+let frameSel=null; const _frameT={};
+function framePick(id){ frameSel=(frameSel===id?null:id); renderSettings(); const p=document.getElementById('framePanel'); if(p) p.scrollIntoView({block:'nearest',behavior:'smooth'}); }
+function framePreview(id,k,val){
+  const f=frames.find(x=>x.id===id); if(!f) return; f[k]=+val;
+  document.querySelectorAll('.framecard.on .avframe').forEach(img=>{ img.style.setProperty(k==='scale'?'--fscale':(k==='dx'?'--fdx':'--fdy'),val+'%'); });
+}
+function frameSet(id,k,val){
+  const f=frames.find(x=>x.id===id); if(!f) return;
+  f[k]=(k==='name')?String(val).slice(0,14):(k==='mode'?val:+val);
+  if(k==='name'){ document.querySelectorAll('.framecard.on span').forEach(e=>e.textContent=f.name); }
+  else if(k==='mode'){ renderSettings(); }
+  else framePreview(id,k,f[k]);
+  clearTimeout(_frameT[id]);
+  _frameT[id]=setTimeout(async()=>{ await dbPut('frames',f); frames=await dbAll('frames'); if(document.getElementById('s-chat').classList.contains('active')) renderChat(); },300);
+}
+async function delFrame(id){
+  const f=frames.find(x=>x.id===id); if(!f) return;
+  const usedBy=[...characters.filter(c=>c.frame===id).map(c=>c.name),...personas.filter(p=>p.frame===id).map(p=>p.name)];
+  if(!confirm('删除头像框「'+f.name+'」？'+(usedBy.length?'在用它的（'+usedBy.join('、')+'）会变回没有框。':''))) return;
+  await dbDel('frames',id);
+  for(const c of characters) if(c.frame===id){ c.frame=''; await dbPut('characters',c); }
+  for(const p of personas) if(p.frame===id){ p.frame=''; await dbPut('personas',p); }
+  frames=await dbAll('frames'); characters=await dbAll('characters'); personas=await dbAll('personas');
+  if(frameSel===id) frameSel=null; renderSettings();
 }
 /* 编辑角色 / 编辑身份里选框 */
 let draftFrame='';
@@ -4911,6 +4955,40 @@ async function applyFont(){
   }else{
     root.style.removeProperty('--font-stack'); toast('这个字体文件读不出来');
   }
+}
+/* 字体详情页：改名、看来源、用 / 停用 / 删 */
+let fontDetailId=null; const _fontNameT={};
+function openFontDetail(id){
+  fontDetailId=id;
+  const f=fonts.find(x=>x.id===id); if(!f) return;
+  if(_fontLoaded[id]===undefined) registerFont(f).then(n=>{ _fontLoaded[id]=n; if(document.getElementById('s-fontdetail').classList.contains('active')) renderFontDetail(); });
+  goTo('s-fontdetail',renderFontDetail);
+}
+function renderFontDetail(){
+  const f=fonts.find(x=>x.id===fontDetailId); if(!f) return goBack();
+  const row=(k,v)=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:.5px solid var(--line)"><b style="flex:0 0 60px;color:var(--sub);font-weight:500">${k}</b><span style="flex:1;min-width:0;word-break:break-all;white-space:pre-wrap">${esc(String(v||'（空）'))}</span></div>`;
+  const fam=`'${f.family}',${f.cssFamily?`'${esc(f.cssFamily)}',`:''}var(--font-stack)`;
+  const cachedN=(f.faces||[]).filter(x=>x.blob).length;
+  document.getElementById('fontdetailBody').innerHTML=`
+    <div class="group" style="padding:16px 14px;font-family:${fam}"><div style="font-size:24px;line-height:1.4">${esc(f.name)}</div>
+      <div style="font-size:15px;line-height:1.6;margin-top:6px">今天也要好好吃饭。<br>The quick brown fox 0123456789</div></div>
+    <div class="group"><div class="field"><label>名字</label><input value="${esc(f.name)}" oninput="fontSetName('${f.id}',this.value)"></div></div>
+    <div class="group" style="padding:4px 12px;font-size:12.5px;line-height:1.5">
+      ${row('类型',f.kind==='css'?'CSS 链接':'字体文件')}
+      ${row('来源',f.url||'本地上传的文件')}
+      ${row('大小',fmtKB(f.size||0))}
+      ${f.kind==='css'?row('缓存',cachedN?cachedN+' / '+(f.faces||[]).length+' 个文件已存本地，不联网也能用':'一个都没存下来，需联网才显示'):''}
+      ${row('状态',S.fontId===f.id?'使用中':'未使用')}
+    </div>
+    ${S.fontId===f.id?`<button class="btn ghost" onclick="useFont('').then(()=>renderFontDetail())">停用，回系统默认</button>`
+      :`<button class="btn" onclick="useFont('${f.id}').then(()=>renderFontDetail())">使用这个字体</button>`}
+    ${f.url?`<button class="btn ghost" onclick="navigator.clipboard?.writeText(fonts.find(x=>x.id==='${f.id}').url).then(()=>toast('链接已复制'))">复制原链接</button>`:''}
+    <button class="btn danger" onclick="delFont('${f.id}').then(()=>{ if(!fonts.find(x=>x.id==='${f.id}')) goBack(); })">删除这个字体</button>
+    <div style="height:20px"></div>`;
+}
+function fontSetName(id,v){
+  const f=fonts.find(x=>x.id===id); if(!f) return; f.name=String(v).slice(0,20);
+  clearTimeout(_fontNameT[id]); _fontNameT[id]=setTimeout(()=>dbPut('fonts',f),400);
 }
 async function useFont(id){
   S.fontId=id||''; await dbPut('settings',S);
@@ -6459,10 +6537,10 @@ function renderSettings(){
     <div class="grouptitle">字体</div>${(warmFonts(),'')}
     <div class="group">
       <div class="cell" onclick="useFont('')"><div class="lbl">系统默认</div><div class="val">${!S.fontId?'使用中':''}</div></div>
-      ${fonts.map(f=>`<div class="cell" onclick="useFont('${f.id}')">
+      ${fonts.map(f=>`<div class="cell" onclick="openFontDetail('${f.id}')">
         <div class="lbl" style="font-family:'${f.family}',${f.cssFamily?`'${esc(f.cssFamily)}',`:''}var(--font-stack)">${esc(f.name)}</div>
         <div class="val">${S.fontId===f.id?'使用中 · ':''}${fmtKB(f.size||0)}${f.kind==='css'&&!f.cached?' · 需联网':''}</div>
-        <button class="mini" style="margin-left:8px" onclick="event.stopPropagation();delFont('${f.id}')">删</button></div>`).join('')}
+        ${S.fontId===f.id?'':`<button class="mini" style="margin-left:8px" onclick="event.stopPropagation();useFont('${f.id}')">用</button>`}${CHEV}</div>`).join('')}
       <div class="cell" onclick="document.getElementById('fontFile').click()"><div class="lbl">上传字体文件</div>${CHEV}</div>
       <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" multiple style="display:none" onchange="importFontFiles(this)">
       <div class="cell" onclick="addFontCss()"><div class="lbl">添加 CSS 链接 / 字体直链</div>${CHEV}</div>
@@ -6476,23 +6554,43 @@ function renderSettings(){
       CSS 链接会把里面的字体文件全部下载缓存（Google Fonts 的中文字体是几十个小文件，等它跑完）；对方不允许跨域下载时退回在线引用。
       中文字体一般 5-20 MB，只存一次。字体不随「导出全部数据」走，换设备要重新导。</div>
 
-    <div class="grouptitle">头像框</div>
-    <div class="group">
-      <div class="cell static"><div class="lbl">显示头像框</div>
-        <label class="switch"><input type="checkbox" ${S.frameOn!==false?'checked':''}
-          onchange="S.frameOn=this.checked;dbPut('settings',S);renderSettings()"><i></i></label></div>
-      <div class="field"><label>框的大小　<b id="fs-val">${frameScaleVal()}%</b>　框的外径相对头像的倍数</label>
-        <input type="range" min="100" max="180" step="2" value="${frameScaleVal()}"
-          oninput="document.getElementById('fs-val').textContent=this.value+'%';document.documentElement.style.setProperty('--frame-scale',this.value+'%')"
-          onchange="S.frameScale=+this.value;dbPut('settings',S)"></div>
-    </div>
+    <div class="grouptitle">头像框　点一个改它的设置</div>
+    <div class="group"><div class="cell static"><div class="lbl">显示头像框</div>
+      <label class="switch"><input type="checkbox" ${S.frameOn!==false?'checked':''}
+        onchange="S.frameOn=this.checked;dbPut('settings',S);renderSettings()"><i></i></label></div></div>
     <div class="framegrid">${frames.map(f=>`
-      <div class="framecard" onclick="if(!guard())frameMenu('${f.id}')">
+      <div class="framecard ${frameSel===f.id?'on':''}" onclick="if(!guard())framePick('${f.id}')" data-lp="frameMenu" data-lpid="${f.id}">
         <div class="fdemo">${frameImg(f)}</div><span>${esc(f.name)}</span></div>`).join('')}
       <div class="frameadd" onclick="document.getElementById('frameFile').click()">${IC('plus',20)}上传</div>
     </div>
+    ${(()=>{ const f=frames.find(x=>x.id===frameSel); if(!f) return '';
+      const used=[...characters.filter(c=>c.frame===f.id).map(c=>c.name),...personas.filter(p=>p.frame===f.id).map(p=>p.name)];
+      return `<div class="group" id="framePanel">
+      <div class="field"><label>名字　角色戴的时候按这个找</label>
+        <input value="${esc(f.name)}" oninput="frameSet('${f.id}','name',this.value)"></div>
+      <div class="field"><label>大小　<b id="fp-scale">${+f.scale||130}%</b>　外径相对头像，只改这一个框</label>
+        <input type="range" min="80" max="220" step="2" value="${+f.scale||130}"
+          oninput="document.getElementById('fp-scale').textContent=this.value+'%';framePreview('${f.id}','scale',this.value)"
+          onchange="frameSet('${f.id}','scale',+this.value)"></div>
+      <div class="field"><label>上下　<b id="fp-dy">${+f.dy||0}%</b>　负数往上</label>
+        <input type="range" min="-30" max="30" step="1" value="${+f.dy||0}"
+          oninput="document.getElementById('fp-dy').textContent=this.value+'%';framePreview('${f.id}','dy',this.value)"
+          onchange="frameSet('${f.id}','dy',+this.value)"></div>
+      <div class="field"><label>左右　<b id="fp-dx">${+f.dx||0}%</b>　负数往左</label>
+        <input type="range" min="-30" max="30" step="1" value="${+f.dx||0}"
+          oninput="document.getElementById('fp-dx').textContent=this.value+'%';framePreview('${f.id}','dx',this.value)"
+          onchange="frameSet('${f.id}','dx',+this.value)"></div>
+      ${f.full?`<div class="cell static"><div class="lbl">按模板对齐（不裁边）</div>
+        <label class="switch"><input type="checkbox" ${f.mode==='full'?'checked':''} onchange="frameSet('${f.id}','mode',this.checked?'full':'crop')"><i></i></label></div>`:''}
+      <div class="inline" style="padding:6px 0 4px;gap:8px">
+        <button class="mini" onclick="openViewer(frames.find(x=>x.id==='${f.id}').src)">查看</button>
+        <button class="mini" onclick="frameSet('${f.id}','dx',0);frameSet('${f.id}','dy',0);frameSet('${f.id}','scale',130)">归零</button>
+        <button class="mini" style="color:var(--danger)" onclick="delFrame('${f.id}')">删除</button>
+        <span style="flex:1"></span><button class="mini" onclick="frameSel=null;renderSettings()">收起</button></div>
+      ${used.length?`<div class="hint" style="margin:0 0 6px">在用：${esc(used.join('、'))}</div>`:''}
+      </div>`; })()}
     <input type="file" id="frameFile" accept="image/*" multiple style="display:none" onchange="importFrames(this)">
-    <div class="hint"><b>想一次套准，按模板画</b>：画布 1024×1024，头像是正中直径 788px 的圆（四边留 118px），框的内圈贴着这个圆，元素不超出画布；上传后点这个框选「按模板对齐」。项目目录和下载文件夹里有一张 <code>头像框模板_1024.png</code> 带辅助圆，垫在底下画就行。<br>
+    <div class="hint">点一个框，下面就是它自己的名字、大小、上下左右，只改这一个。<br><b>想一次套准，按模板画</b>：画布 1024×1024，头像是正中直径 788px 的圆（四边留 118px），框的内圈贴着这个圆，元素不超出画布；上传后点这个框开「按模板对齐」。项目目录和下载文件夹里有一张 <code>头像框模板_1024.png</code> 带辅助圆，垫在底下画就行。<br>
       上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边。框的外径按头像的倍数放，装饰压住头像边缘一点是正常的。位置偏了点框，菜单里有上下左右微调。
       给谁戴：编辑角色 / 编辑身份里选。头像是 emoji 的戴不了框，得用图片头像。</div>
 
@@ -8884,14 +8982,7 @@ function phoneApp(k){
   if(k==='lithium')return openLi();
   if(k==='chats')  return openPhChats();
   if(k==='wallet') return toast('钱包还没做');
-  if(k==='gallery'||k==='photos'){
-    const pics=[
-      ...(c.photos||[]).map(p=>({src:p.src,t:(p.caption||(p.from==='moment'?'朋友圈配图':'发给你的照片'))+'　'+fmtTime(p.at||0)})),
-      ...((c.li&&c.li.posts)||[]).filter(p=>p.img).map(p=>({src:p.img,t:'lithium：'+String(p.text||'').slice(0,20)})),
-      ...(c.images||[]).map((src,i)=>({src,t:'角色图片 '+(i+1)}))];
-    if(!pics.length) return toast('相册是空的：TA 发过的照片、朋友圈和 lithium 的配图、编辑角色里加的图都会在这');
-    return actionSheet('相册　'+pics.length+' 张',pics.map(p=>({t:p.t,av:p.src,fn:()=>openViewer(p.src)})));
-  }
+  if(k==='gallery'||k==='photos') return openAlbum(c.id);
   openApp(k);
 }
 
@@ -10544,6 +10635,58 @@ async function buildVibeParams(g){
 
 let lastImgReq=null;   // 上一次实际发出的生图请求（设置 → 生图 → 诊断 里能看）
 function noteImgReq(o){ lastImgReq={at:Date.now(),...o}; try{ S.lastImg={...lastImgReq}; dbPut('settings',S); }catch(e){} }
+/* ---------- TA 的手机 → 相册：一张张的图，点开看参数 / 点亮 / 删 ---------- */
+let albumCid=null, albumKey=null;
+const ALBUM_SRC={chat:'TA 发给你的',moment:'朋友圈',lithium:'lithium',images:'角色图片',user:'你发的',gen:'生成页'};
+function albumItems(c){
+  const out=[];
+  (c.photos||[]).forEach((p,i)=>out.push({key:'p'+i,src:p.src,caption:p.caption||'',from:p.from||'chat',at:p.at||0,fav:!!p.fav,del:true}));
+  ((c.li&&c.li.posts)||[]).forEach((p,i)=>{ if(p.img) out.push({key:'l'+i,src:p.img,caption:String(p.text||''),from:'lithium',at:p.at||0,fav:false,del:false}); });
+  (c.images||[]).forEach((src,i)=>out.push({key:'i'+i,src,caption:'角色图片 '+(i+1),from:'images',at:0,fav:false,del:true}));
+  return out;
+}
+function openAlbum(cid){ albumCid=cid; goTo('s-album',renderAlbum); }
+function renderAlbum(){
+  const c=characters.find(x=>x.id===albumCid); if(!c) return goBack();
+  const items=albumItems(c);
+  document.getElementById('albumBody').innerHTML=items.length?`
+    <div class="imglog-grid">${items.map(it=>`<div class="it2" onclick="openPhoto('${it.key}')">
+      <img src="${esc(it.src)}" alt="">${it.fav?'<span class="favb">★</span>':''}
+      <span class="tag">${esc(ALBUM_SRC[it.from]||it.from||'照片')}</span></div>`).join('')}</div>
+    <div class="hint">${items.length} 张。★ 是 TA 点亮过的。点开看说明、参数，或者删掉。</div>`
+    :`<div class="empty"><p>相册是空的<br>TA 发过的照片、朋友圈和 lithium 的配图、编辑角色里加的图都会在这</p></div>`;
+}
+function openPhoto(key){ albumKey=key; goTo('s-photo',renderPhoto); }
+function renderPhoto(){
+  const c=characters.find(x=>x.id===albumCid); if(!c) return goBack();
+  const it=albumItems(c).find(x=>x.key===albumKey); if(!it) return goBack();
+  document.getElementById('photoBody').innerHTML=`
+    <img class="imgdetail-img" src="${esc(it.src)}" onclick="openViewer(this.src)">
+    <div class="hint" style="margin-top:8px">${esc(ALBUM_SRC[it.from]||it.from)}${it.at?'　'+fmtTime(it.at):''}<br>${esc(it.caption||'（没有说明）')}</div>
+    ${it.key[0]==='p'?`<button class="btn ${it.fav?'':'ghost'}" onclick="togglePhotoFav('${it.key}')">${it.fav?'★ TA 点亮了这张　点一下取消':'☆ 替 TA 点亮这张'}</button>`:''}
+    <button class="btn ghost" onclick="photoParams('${it.key}')">看参数和当时的描述</button>
+    <button class="btn ghost" onclick="downloadImage(this.parentNode.querySelector('img').src,'小手机_photo.png')">下载到本地</button>
+    ${it.del?`<button class="btn danger" onclick="delPhoto('${it.key}')">删除这张</button>`:`<div class="hint">这是 lithium 帖子的配图，要删去 lithium 那条帖子里删。</div>`}
+    <div style="height:20px"></div>`;
+}
+async function togglePhotoFav(key){
+  const c=characters.find(x=>x.id===albumCid); const i=+key.slice(1);
+  if(!c||!c.photos||!c.photos[i]) return;
+  c.photos[i].fav=!c.photos[i].fav; await dbPut('characters',c); characters=await dbAll('characters'); renderPhoto();
+}
+async function photoParams(key){
+  const c=characters.find(x=>x.id===albumCid); const it=albumItems(c).find(x=>x.key===key); if(!it) return;
+  imglog=(await dbAll('imglog')).sort((a,b)=>b.at-a.at);
+  const r=imglog.find(x=>x.src===it.src);
+  if(r) openImgDetail(r.id); else toast('这张没有生图记录：不是程序生成的，或者记录已经清掉了');
+}
+async function delPhoto(key){
+  const c=characters.find(x=>x.id===albumCid); if(!c) return;
+  if(!confirm('删除这张？')) return;
+  const i=+key.slice(1);
+  if(key[0]==='p') (c.photos||[]).splice(i,1); else if(key[0]==='i') (c.images||[]).splice(i,1); else return;
+  await dbPut('characters',c); characters=await dbAll('characters'); goBack(); renderAlbum();
+}
 /* ---------- 生图记录：列表 / 详情 / 重生成 / 下载 / 存相册 ---------- */
 let imglog=[], imgDetailId=null;
 const SRC_NAME={chat:'聊天',moment:'朋友圈',lithium:'lithium',gen:'生成页'};
