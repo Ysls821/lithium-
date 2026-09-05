@@ -22,7 +22,7 @@
   --grad:linear-gradient(165deg,#8E7BF8 0%,#6A56E8 100%);
   --bubble-ta:#FFFFFF; --bubble-ta-text:#0B0B0F;
   --chat-bg:linear-gradient(180deg,#F6F3FF 0%,#F2F2F7 42%,#F2F2F7 100%);
-  --nav:rgba(255,255,255,.78);
+  --nav:rgba(255,255,255,.78); --bar:#FCFCFD;   /* nav 压在 bg 上的实色，状态栏和聊天顶栏共用 */
   --shadow-s:0 1px 3px rgba(16,14,40,.07);
   --danger:#FF3B30; --ok:#34C759;
   --r:18px;
@@ -35,7 +35,7 @@
     --accent:#9A8AFF; --accent-soft:rgba(154,138,255,.16);
     --bubble-ta:#26262C; --bubble-ta-text:#F5F5F7;
     --chat-bg:linear-gradient(180deg,#16122B 0%,#0A0A0F 46%,#000 100%);
-    --nav:rgba(22,22,26,.76);
+    --nav:rgba(22,22,26,.76); --bar:#111114;
     --shadow-s:0 1px 3px rgba(0,0,0,.4);
   }
 }
@@ -181,7 +181,10 @@ body{background:#0A0A0C;color:var(--text);
 #s-chat .body{background:transparent}
 /* 有背景图但没开沉浸：顶栏 / 输入栏用实底，和状态栏一个颜色，图只铺在消息区 */
 #s-chat.hasbg .navbar,#s-chat.hasbg #chatInputBar,#s-chat.hasbg #quoteBar,#s-chat.hasbg #selectBar{
-  background:var(--bg)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  background:var(--bar)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+/* 非沉浸：状态栏和聊天顶栏都用同一个实色 --bar，不再各自半透明压在不同底色上 */
+#phone:not(.imm):not(.himm) #statusbar,#phone:not(.imm):not(.himm) #s-chat .navbar{
+  background:var(--bar);-webkit-backdrop-filter:none;backdrop-filter:none}
 
 /* ── 沉浸模式：背景通栏，上下栏浮在图上 ──
    前景色不写死，按背景图亮度自动在 深色前景 / 浅色前景 之间切换 */
