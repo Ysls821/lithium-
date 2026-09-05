@@ -1020,6 +1020,11 @@ input[type=range]{accent-color:var(--accent)}
   box-shadow:var(--shadow-s);cursor:pointer;border:2.5px solid transparent}
 .vibecard.on{border-color:var(--accent)}
 .vibecard img{width:100%;height:100%;object-fit:cover}
+.vibecard .vibeph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+  background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:16px}
+.vibecard.off .vibeph{opacity:.4}
+.vibecard .vtag{position:absolute;top:5px;left:5px;font-size:9.5px;padding:1px 5px;border-radius:5px;
+  background:rgba(0,0,0,.55);color:#fff}
 .vibecard.off img{filter:grayscale(1);opacity:.4}
 .vibecard .vn{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;
   font-size:9.5px;padding:2px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -3163,10 +3168,41 @@ EVE 的原句（解码 0x27e6）就一行：
 
 另一半原因是 NovelAI 画无人物场景本来就弱，那是模型的事，要解决得走「按内容分后端」，用户在考虑，还没定。
 
+### 2026-09-05（十二）· 第二后端按内容分流 / vibe 文件与组 / 聊天里 TA 发照片
+
+用户拍板三件事：NovelAI 只画人物，无人物的图走别的 API；vibe 是文件不是相册，而且要成组；聊天里说「发张自拍」要真的收到一张按当前剧情生成的照片。
+
+**① 第二后端**（设置 → 生图 → 第二后端）
+
+- `S.img2 = {on, backend, base, key, model}`，完整一套；地址 / Key 留空且后端是「聊天接口」时沿用聊天那套
+- 路由规则在 `generateImage(scene, char, opt)` 里：**传了角色 = 有人 → 主后端；没传角色 → 第二后端开着就走它**；`opt.route` 可强制 main / second
+- 第二后端只发画面描述（`_plain`），不拼画师串、质量词、负向、vibe——那些是给 NAI 那类 tag 模型准备的
+- 可用性判断统一成 `imgReadyFor(hasPerson)`：朋友圈、lithium、聊天照片、生成页都按「这张图有没有人」决定用哪一路和能不能用
+- 生成页多了 自动 / 主后端 / 第二后端 三段切换；设置页有「用第二后端试生成一张风景」
+- 拉模型抽成 `fetchModelList(cfg)`，两套后端共用
+
+**② vibe 文件**
+
+- 「上传」改成文件选择器：认 NovelAI 导出的 `.naiv4vibe`（单个）和 `.naiv4vibebundle`（一组），也认图片
+- vibe 文件自带各模型的编码（`encodings`），`vibeEncFor(v, model)` 按当前模型挑（`v4full` / `v4curated` / `v4-5full`…，key 归一化后匹配），挑到就直接放进 `reference_image_multiple`，**不用再打 `/ai/encode-vibe`，不扣点数**；挑不到且没图就跳过并提示；图片来的 vibe 走原来的编码路
+- bundle 按文件名成一组，vibe 区上方出组名 chip，点一下整组开关
+- 没有缩略图的卡片显示名字前两字的占位，文件来的卡片角上标「文件」
+
+**③ 聊天里 TA 发照片**（聊天设置 → TA 发照片，默认开）
+
+- 提示词功能段加「发照片」：`{"type":"image","caption":"…","tags":"英文 tag：画面 + 此刻动作表情穿着 + 场景光线","self":true}`，规则和贴表情一样——不能只发图不说话，一轮最多一张
+- `normPart` 认 image / photo / picture；`toMsg` 存成 `{type:'image', meta:{gen:true, tags, self, pending:true}}`，先渲染成「拍照中…」的占位卡
+- `genChatImage` 排队后台生成（一张张来，主动消息和起居注分享那两条路也接了），生成完把 `meta.src` 填进去重画；失败时占位卡写「没生成出来，点一下重试」，点卡片 `retryChatImage`
+- 提示词拼法：tags 是画面，角色固定词 + 画师串 + 质量词 + vibe 由 `buildImgPrompt` / `buildVibeParams` 照常拼；`self:false` 的照片不带角色词并走第二后端
+- 生成出来的图 `real:false`，不会当视觉输入喂回模型，模型看到的还是 `[图片：caption]`
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「有没有人」是生图路由的唯一开关** → 主/第二后端、拼不拼角色词、用不用 vibe，全都挂在这一个标记上。凡是产出图片描述的地方（朋友圈、lithium、聊天照片、生成页）都必须把这个标记一起产出来，缺了就只能靠正则猜。
+- **文件里已有的编码别再花钱算一遍** → NAI 的 vibe 文件自带各模型编码，之前一律重新 encode 等于每次多扣点数。外部导出物先看里面有什么，再决定要不要调接口。
+- **后台生成要排队** → 一轮回复可能带照片、朋友圈自动配图也可能同时触发，并发打 NAI 会 429。聊天照片走一个串行队列，朋友圈和 lithium 各自也是一张张来。
 - **顺序 await 一串网络请求** → 几十个小文件串行等于把延迟乘几十倍。凡是互不依赖的下载都要并行，给个并发上限就行。
 - **给「东西」配图别带角色外貌词（第二次）** → 朋友圈修过一次，lithium 那条线漏了。同一类问题要顺着所有调用点过一遍，不能只修报出来的那个入口。
 - **「不联网也能显示」不能靠 `<link>`** → 外链字体每次打开都要请求一次，被墙或断网就退回系统字体。要做到离线可用，必须在添加的那一刻把字体文件抓下来存本地，链接只当来源。
@@ -3351,7 +3387,8 @@ const DEFAULT_SETTINGS={
     vibeOn:true, vibes:[],
     quality:'best quality, very aesthetic, absurdres',
     negative:'lowres, worst quality, bad anatomy, bad hands, watermark, signature, jpeg artifacts, blurry',
-    artists:[{id:'a1',name:'默认',text:''}],activeArtist:'a1'}
+    artists:[{id:'a1',name:'默认',text:''}],activeArtist:'a1'},
+  img2:{on:false,backend:'chat',base:'',key:'',model:''}   // 第二后端：没有人物的图走这里
 };
 
 let S={...DEFAULT_SETTINGS}, characters=[], personas=[], worldbooks=[], memories=[];
@@ -3371,7 +3408,7 @@ const DEFAULT_CHAT={
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   memCore:0, memEpisodic:0, memEvery:0,      // 0=跟随全局
   xdmEnabled:false, xdmRate:15, xdmHours:6,
-  avatarRadius:50, bubbleRadius:20, textMe:'', textTa:'',
+  avatarRadius:50, bubbleRadius:20, textMe:'', textTa:'', charImg:true,
   proEnabled:false, proMinutes:60, proDaily:5,
   sceneMode:'online',         // online=隔着手机  offline=面对面
   styleExamples:''            // 角色专属风格示例，空=用全局的
@@ -6366,8 +6403,11 @@ function bubbleHTML(m,cfg,isMe){
         <img src="${esc(m.meta.src)}" onclick="event.stopPropagation();openMsgImage('${m.id}')" alt="">
         ${m.meta.real?'<span class="realtag">可识别</span>':''}
         ${m.content?`<div class="cap">${esc(m.content)}</div>`:''}</div>`;
-    // 假图：没有真实图片，画一张占位卡 + 描述
-    return `<div class="bubble fake" ${style}><div class="ph">${IC('image',30)}<small>图片</small></div>
+    // 假图：没有真实图片，画一张占位卡 + 描述；角色发的会先显示「拍照中」，失败了点一下重来
+    const mt=m.meta||{};
+    return `<div class="bubble fake" ${style} ${mt.gen&&!mt.pending?`onclick="event.stopPropagation();retryChatImage('${m.id}')"`:''}>
+      <div class="ph">${mt.pending?`<span class="spin"></span><small>拍照中…</small>`
+        :`${IC('image',30)}<small>${mt.gen?(mt.genErr?'没生成出来，点一下重试':'点一下生成'):'图片'}</small>`}</div>
       <div class="cap2">${esc(m.content||'（没有描述）')}</div></div>`;
   }
   if(m.type==='voice'){
@@ -7003,6 +7043,12 @@ function renderChatSet(){
       TA 发这几条消息时在做什么、什么表情、身边什么环境。
       点 TA 消息旁边的<b>头像</b>就能看。每次回复会稍微多花一点 token。</div>
 
+    <div class="grouptitle">TA 发照片</div>
+    <div class="group"><div class="cell static"><div class="lbl">允许 TA 在聊天里发照片</div>
+      <label class="switch"><input type="checkbox" ${g.charImg!==false?'checked':''}
+        onchange="setCfg('charImg',this.checked,true)"><i></i></label></div></div>
+    <div class="hint">TA 会在合适的时候拍一张发过来。提示词由聊天模型按当前动作、穿着、场景写，再拼上角色固定词、画师串和 vibe 去生图；照片里没有 TA 本人的走第二后端。生图没配好时只显示占位卡和描述。</div>
+
     <div class="grouptitle">角色主动发消息</div>
     <div class="group">
       <div class="cell static"><div class="lbl">开启</div>
@@ -7289,6 +7335,7 @@ async function proactiveSend(c,ms,g){
     const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(p),timestamp:Date.now()};
     if(_pv) row.meta={...row.meta,pov:String(_pv.content||'').slice(0,300)};
     await dbPut('messages',row);
+    if(row.type==='image') genChatImage(row.id);
   }
   const today=new Date().toDateString();
   const log=c.proLog||{};
@@ -8860,7 +8907,7 @@ function renderMoments(){
             `<img src="${esc(src)}" onclick="openViewer(moments.find(x=>x.id==='${m.id}').images[${i}])">`).join('')}</div>`
             :(m.imgDesc?`<div class="mlock" onclick="if(!guard())mmGenImage('${m.id}')">${IC('image',18)}
               <span>${esc(String(m.imgDesc).slice(0,60))}</span>
-              <small>${imgReady()?'点一下生成这张图':'配好生图后点这里出图'}</small></div>`:'')}
+              <small>${imgReadyFor(m.self?1:0)?'点一下生成这张图':'配好生图后点这里出图'}</small></div>`:'')}
           <div class="mf"><span>${fmtTime(m.timestamp)}</span>
             <b onclick="likeMoment('${m.id}')">${m.liked?'取消赞':'赞'}</b>
             <b onclick="commentMoment('${m.id}')">评论</b></div>
@@ -8975,13 +9022,13 @@ async function aiPostMoment(){
     await dbPut('moments',{id,chatId:curCharId,author:'char',text,imgDesc,self,
       images:[],comments:[],liked:false,timestamp:Date.now()});
     moments=await dbAll('moments'); renderMoments(); toast('发好了');
-    if(imgDesc&&imgReady()&&imgCfg().autoPost!==false) await mmGenImage(id,true);
+    if(imgDesc&&imgReadyFor(self?1:0)&&imgCfg().autoPost!==false) await mmGenImage(id,true);
   }catch(e){ toast('失败：'+e.message); }
 }
 /* 给一条动态配图：有 imgDesc 就按它画；照片里有 TA 自己才带角色固定词 */
 async function mmGenImage(id,silent){
   const m=moments.find(x=>x.id===id); if(!m) return;
-  if(!imgReady()) return toast('先去 设置 → 生图 配一下');
+  if(!imgReadyFor(m.self?1:0)) return toast('先去 设置 → 生图 配一下');
   let desc=String(m.imgDesc||'').trim();
   if(!desc){
     const d=prompt('这张图画什么（英文 tag 或一句英文）：','');
@@ -9262,11 +9309,17 @@ function imgEndpoint(g){
   return {base:String(g.base||'').replace(/\/+$/,''),key:g.key||''};
 }
 const imgReady=()=>!!imgEndpoint().base;
+const img2Cfg=()=>({...DEFAULT_SETTINGS.img2,...(S.img2||{})});
+const img2Ready=()=>{ const g=img2Cfg(); return !!g.on&&!!imgEndpoint(g).base; };
+/* 这张图有没有人：有人一定走主后端；没有人且第二后端开着就走第二后端 */
+const imgReadyFor=char=>char?imgReady():(imgReady()||img2Ready());
 
 let draftImg=null;
-function openImgCfg(){ draftImg=imgCfg(); renderImgCfg(); show('s-imgset'); }
+let draftImg2=null;
+function openImgCfg(){ draftImg=imgCfg(); draftImg2=img2Cfg(); renderImgCfg(); show('s-imgset'); }
+function setImg2(k,v){ readImgForm(); draftImg2[k]=v; renderImgCfg(); }
 function renderImgCfg(){
-  const g=draftImg;
+  const g=draftImg, g2=draftImg2||img2Cfg();
   const isNai=g.backend==='novelai', isChat=g.backend==='chat';
   document.getElementById('imgsetBody').innerHTML=`
     <div class="grouptitle">后端</div>
@@ -9343,12 +9396,19 @@ function renderImgCfg(){
     <div class="group"><div class="cell static"><div class="lbl">启用 Vibe</div>
       <label class="switch"><input type="checkbox" ${g.vibeOn?'checked':''}
         onchange="setImg('vibeOn',this.checked)"><i></i></label></div></div>
+    ${(()=>{ const gs=[...new Set((g.vibes||[]).map(v=>v.group||'').filter(Boolean))];
+      return gs.length?`<div style="padding:2px 2px 8px">${gs.map(gn=>{
+        const vs=g.vibes.filter(v=>(v.group||'')===gn), onN=vs.filter(v=>v.on!==false).length;
+        return `<span class="chip ${onN===vs.length?'on':''}" onclick="toggleVibeGroup('${esc(gn)}')">${esc(gn)} ${onN}/${vs.length}</span>`;
+      }).join('')}</div>`:''; })()}
     <div class="vibegrid">${(g.vibes||[]).map(v=>
       `<div class="vibecard ${v.on!==false?'on':'off'}" onclick="toggleVibe('${v.id}')"
-        data-lp="vibeMenu" data-lpid="${v.id}"><img src="${esc(v.src)}" alt="">
+        data-lp="vibeMenu" data-lpid="${v.id}">${v.src?`<img src="${esc(v.src)}" alt="">`:`<div class="vibeph">${esc(String(v.name||'v').slice(0,2))}</div>`}
+        ${v.enc?'<span class="vtag">文件</span>':''}
         <span class="vn">${esc(v.name)} ${(+v.strength||0.6).toFixed(1)}</span></div>`).join('')}
       <div class="vibeadd" onclick="addVibe()">${IC('plus',20)}上传</div></div>
-    <div class="hint">点卡片开关，长按改名字 / 调强度 / 删除。<br>
+    <div class="hint">「上传」认 NovelAI 导出的 <b>.naiv4vibe / .naiv4vibebundle</b> 文件（自带编码，用的时候不扣点数；bundle 会按文件名成一组，点上面的组名整组开关），也认图片（V4 每次编码要扣点数）。<br>
+      点卡片开关，长按改名字 / 调强度 / 删除。<br>
       <b>只对 nai-diffusion-3 / 4 系列生效</b>，V5 或其他后端会自动跳过，不会报错。
       V4 系列需要反代提供 <code>/ai/encode-vibe</code> 端点，没有的话本次生成会自动不带 vibe。</div>
 
@@ -9360,6 +9420,27 @@ function renderImgCfg(){
     <div class="group"><div class="field">
       <textarea id="ig-negative" style="min-height:84px">${esc(g.negative)}</textarea></div></div>
     <div class="hint">角色可以在「编辑角色」里加自己的固定提示词和额外负向，会和这里合并。</div>
+
+    <div class="grouptitle">第二后端　没有人物的图</div>
+    <div class="group"><div class="cell static"><div class="lbl">没有人物的图走第二后端</div>
+      <label class="switch"><input type="checkbox" ${g2.on?'checked':''}
+        onchange="setImg2('on',this.checked)"><i></i></label></div></div>
+    ${g2.on?`<div class="seg" style="margin:0 0 8px">
+      ${Object.entries(IMG_BACKENDS).map(([k,v])=>
+        `<div class="${g2.backend===k?'on':''}" style="font-size:12.5px" onclick="setImg2('backend','${k}')">${v}</div>`).join('')}
+    </div>
+    <div class="group">
+      <div class="field"><label>接口地址</label>
+        <input id="ig2-base" value="${esc(g2.base)}" placeholder="${g2.backend==='chat'?'留空 = 用聊天接口地址':'https://…'}"></div>
+      <div class="field"><label>API Key</label>
+        <input id="ig2-key" type="password" value="${esc(g2.key)}" placeholder="${g2.backend==='chat'?'留空 = 用聊天的 Key':'可留空'}"></div>
+      <div class="field"><label>模型</label>
+        <div class="inline"><input id="ig2-model" value="${esc(g2.model)}" placeholder="gpt-image-1 / gemini-2.5-flash-image">
+        <button class="mini" onclick="fetchImg2Models()">拉取</button></div></div>
+    </div>
+    <button class="btn ghost" onclick="testImg2()">用第二后端试生成一张风景</button>`:''}
+    <div class="hint">NovelAI 画人像强、画风景饭照弱。开了以后：朋友圈 / lithium / 聊天里标了「没有本人」的图，以及生成页里没选角色的图，都走这里。
+      这条路只发画面描述，不拼画师串和质量词。宽高步数沿用上面的。</div>
 
     <div class="grouptitle">自动配图</div>
     <div class="group"><div class="cell static"><div class="lbl">TA 发朋友圈 / lithium 帖子时自动出图</div>
@@ -9388,6 +9469,10 @@ function readImgForm(){
     const a=g.artists.find(x=>x.id===g.activeArtist);
     if(a&&v('ig-artist')!==null) a.text=v('ig-artist');
     g.vibes=g.vibes||[]; g.order=g.order||'artist,char,scene,quality';
+  }
+  if(draftImg2&&v('ig2-base')!==null){
+    draftImg2.base=v('ig2-base').trim().replace(/\/+$/,''); draftImg2.key=v('ig2-key').trim();
+    draftImg2.model=v('ig2-model').trim();
   }
 }
 function updArtist(t){
@@ -9452,13 +9537,71 @@ function pickOrder(){
 }
 function addVibe(){
   readImgForm();
-  pickImage(d=>{
-    const n=prompt('给这个 vibe 起个名字：','vibe '+((draftImg.vibes||[]).length+1));
-    if(n===null) return;
-    draftImg.vibes=[...(draftImg.vibes||[]),
-      {id:uid(),name:(n.trim()||'vibe').slice(0,10),src:d,info:1,strength:0.6,on:true}];
-    renderImgCfg();
-  },640,.92,{ratio:0,title:'Vibe 参考图'});
+  let inp=document.getElementById('vibeFile');
+  if(!inp){
+    inp=document.createElement('input'); inp.type='file'; inp.id='vibeFile'; inp.multiple=true;
+    inp.accept='.naiv4vibe,.naiv4vibebundle,.json,image/*'; inp.style.display='none';
+    inp.onchange=()=>importVibeFiles(inp);
+    document.body.appendChild(inp);
+  }
+  inp.value=''; inp.click();
+}
+/* 图片缩到 maxW 再存，别把原图塞进设置 */
+function fileToDataUrl(file,maxW){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const sc=Math.min(1,maxW/Math.max(img.width,img.height));
+        const cv=document.createElement('canvas');
+        cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        res(cv.toDataURL('image/jpeg',.92));
+      };
+      img.onerror=()=>rej(new Error('图片读不出来'));
+      img.src=fr.result;
+    };
+    fr.onerror=()=>rej(new Error('文件读不出来'));
+    fr.readAsDataURL(file);
+  });
+}
+/* 一条 NAI vibe 对象 -> 我们的记录。thumbnail 只用来看，编码在 enc 里 */
+function vibeFromNai(v,group){
+  const ii=v.importInfo||{};
+  return {id:uid(),name:String(v.name||'vibe').slice(0,14),src:v.thumbnail||'',enc:v.encodings||{},
+    info:+ii.information_extracted||1,strength:+ii.strength||0.6,on:true,group:group||''};
+}
+async function importVibeFiles(inp){
+  const files=[...(inp.files||[])]; if(!files.length) return;
+  draftImg.vibes=draftImg.vibes||[];
+  let n=0, bad=0;
+  for(const f of files){
+    try{
+      if(/\.(naiv4vibe|naiv4vibebundle|json)$/i.test(f.name)){
+        const j=JSON.parse(await f.text());
+        const base=f.name.replace(/\.(naiv4vibe|naiv4vibebundle|json)$/i,'');
+        if(Array.isArray(j.vibes)){
+          for(const v of j.vibes){ draftImg.vibes.push(vibeFromNai(v,base.slice(0,12))); n++; }
+        }else if(j.encodings||j.thumbnail){
+          draftImg.vibes.push(vibeFromNai(j,'')); n++;
+        }else throw new Error('不是 NovelAI 的 vibe 文件');
+      }else if(/^image\//.test(f.type)){
+        const d=await fileToDataUrl(f,640);
+        draftImg.vibes.push({id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,10)||'vibe',src:d,info:1,strength:0.6,on:true,group:''});
+        n++;
+      }else throw new Error('不认识的文件');
+    }catch(e){ bad++; toast(f.name+'：'+e.message); }
+  }
+  renderImgCfg();
+  if(n) toast('加了 '+n+' 个 vibe'+(bad?'，'+bad+' 个没读出来':''));
+}
+function toggleVibeGroup(gn){
+  readImgForm();
+  const vs=(draftImg.vibes||[]).filter(v=>(v.group||'')===gn);
+  const allOn=vs.every(v=>v.on!==false);
+  vs.forEach(v=>{ v.on=!allOn; });
+  renderImgCfg();
 }
 function toggleVibe(id){
   if(guard()) return;
@@ -9479,7 +9622,7 @@ function vibeMenu(id){
       const x=prompt('信息提取 0.1–1.0，越大越抓细节：',String(v.info||1));
       if(x===null) return;
       v.info=Math.max(0.1,Math.min(1,parseFloat(x)||1)); renderImgCfg(); }},
-    {ic:'image',t:'查看原图',fn:()=>openViewer(v.src)},
+    ...(v.src?[{ic:'image',t:'查看原图',fn:()=>openViewer(v.src)}]:[]),
     {ic:'trash',t:'删除',danger:true,fn:()=>{
       draftImg.vibes=draftImg.vibes.filter(x=>x.id!==id); renderImgCfg(); }}
   ]);
@@ -9488,38 +9631,48 @@ function pickSampler(){
   actionSheet('采样器',NAI_SAMPLERS.map(x=>({t:x,cur:draftImg.sampler===x,
     fn:()=>{ readImgForm(); draftImg.sampler=x; renderImgCfg(); }})));
 }
+/* 按某套配置拉模型列表（主后端 / 第二后端共用） */
+async function fetchModelList(g){
+  if(g.backend==='novelai') return NAI_MODELS.slice();
+  const ep=imgEndpoint(g);
+  if(!ep.base) throw new Error(g.backend==='chat'?'聊天接口地址也没填':'先填地址');
+  let list=[];
+  if(g.backend==='a1111'){
+    const r=await fetch(ep.base+'/sdapi/v1/sd-models');
+    if(!r.ok) throw new Error(r.status);
+    list=(await r.json()).map(x=>x.model_name||x.title).filter(Boolean);
+  }else{
+    const r=await fetch(ep.base+'/models',{headers:ep.key?{'Authorization':'Bearer '+ep.key}:{}});
+    if(!r.ok) throw new Error(r.status);
+    const j=await r.json();
+    list=(j.data||j.models||[]).map(x=>x.id||x.name).filter(Boolean);
+    if(g.backend==='chat'||g.backend==='openai'){
+      const im=list.filter(x=>/image|imagen|banana|dall|flux|diffusion|kontext|seedream|ideogram|midjourney/i.test(x));
+      if(im.length) list=im; else toast('列表里没看到图像模型，全部列出');
+    }
+  }
+  if(!list.length) throw new Error('没有返回模型');
+  return list;
+}
 async function fetchImgModels(){
   readImgForm();
-  const g=draftImg;
-  if(g.backend==='novelai')
-    return actionSheet('NovelAI 模型',NAI_MODELS.map(x=>({t:x,cur:g.model===x,
-      fn:()=>{ g.model=x; renderImgCfg(); }})));
-  const ep=imgEndpoint(g);
-  if(!ep.base) return toast(g.backend==='chat'?'聊天接口地址也没填':'先填地址');
-  try{
-    let list=[];
-    if(g.backend==='a1111'){
-      const r=await fetch(g.base+'/sdapi/v1/sd-models');
-      if(!r.ok) throw new Error(r.status);
-      list=(await r.json()).map(x=>x.model_name||x.title).filter(Boolean);
-    }else{
-      const r=await fetch(ep.base+'/models',{headers:ep.key?{'Authorization':'Bearer '+ep.key}:{}});
-      if(!r.ok) throw new Error(r.status);
-      const j=await r.json();
-      list=(j.data||j.models||[]).map(x=>x.id||x.name).filter(Boolean);
-      if(g.backend==='chat'){
-        const im=list.filter(x=>/image|imagen|banana|dall|flux|diffusion|kontext|seedream|ideogram|midjourney/i.test(x));
-        if(im.length) list=im; else toast('列表里没看到图像模型，全部列出');
-      }
-    }
-    if(!list.length) throw new Error('没有返回模型');
-    actionSheet('选择模型',list.slice(0,80).map(x=>({t:x,cur:g.model===x,
-      fn:()=>{ g.model=x; renderImgCfg(); }})));
+  try{ const list=await fetchModelList(draftImg);
+    actionSheet('选择模型',list.slice(0,80).map(x=>({t:x,cur:draftImg.model===x,fn:()=>{ draftImg.model=x; renderImgCfg(); }})));
   }catch(e){ toast('拉取失败：'+e.message); }
+}
+async function fetchImg2Models(){
+  readImgForm();
+  try{ const list=await fetchModelList(draftImg2);
+    actionSheet('第二后端模型',list.slice(0,80).map(x=>({t:x,cur:draftImg2.model===x,fn:()=>{ draftImg2.model=x; renderImgCfg(); }})));
+  }catch(e){ toast('拉取失败：'+e.message); }
+}
+function testImg2(){
+  readImgForm(); S.img={...draftImg}; S.img2={...draftImg2};
+  openGen({scene:'rainy street at night, wet asphalt, neon reflections, no people, photo',route:'second',back:()=>show('s-imgset')});
 }
 async function saveImgCfg(){
   readImgForm();
-  S.img={...draftImg};
+  S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
   await dbPut('settings',S);
   toast('已保存'); tab('s-settings');
 }
@@ -9605,16 +9758,37 @@ function vibeSupported(model){
   if(/nai-diffusion-5/.test(m)) return false;
   return /nai-diffusion-(3|4)/.test(m);
 }
+/* NovelAI 导出的 .naiv4vibe 里自带各模型的编码：按当前模型挑一个，挑到就不用再花点数编码 */
+function vibeEncFor(v,model){
+  const enc=v&&v.enc; if(!enc||typeof enc!=='object') return null;
+  const norm=k=>String(k).toLowerCase().replace(/[^a-z0-9]/g,'');
+  const m=String(model||'');
+  const want=(/4-5/.test(m)?'v45':'v4')+(/curated/.test(m)?'curated':'full');
+  const keys=Object.keys(enc);
+  const k=keys.find(x=>norm(x)===want)||keys.find(x=>norm(x).includes(want))||null;
+  if(!k) return null;
+  const bucket=enc[k];
+  let e=null;
+  if(typeof bucket==='string') e=bucket;
+  else if(bucket&&typeof bucket==='object'){
+    const first=bucket.encoding?bucket:Object.values(bucket)[0];
+    e=first&&(typeof first==='string'?first:first.encoding);
+  }
+  return typeof e==='string'&&e.length>20?e:null;
+}
 async function buildVibeParams(g){
   if(!g.vibeOn) return null;
-  const on=(g.vibes||[]).filter(v=>v.on!==false&&v.src);
+  const on=(g.vibes||[]).filter(v=>v.on!==false&&(v.src||v.enc));
   if(!on.length) return null;
   if(!vibeSupported(g.model)) return null;
   const isV4=/nai-diffusion-4/.test(g.model);
-  const imgs=[];
+  const imgs=[], used=[];
   for(const v of on){
     if(isV4){
-      // V4 系列要先把图编码成 vibe；反代没这个端点就跳过 vibe，不要让整张图失败
+      const pre=vibeEncFor(v,g.model);
+      if(pre){ imgs.push(pre); used.push(v); continue; }
+      if(!v.src){ toast('vibe「'+v.name+'」没有当前模型的编码，已跳过'); continue; }
+      // 图片来的 vibe：V4 要先编码（这一步扣点数）；反代没这个端点就跳过 vibe，不要让整张图失败
       try{
         const r=await fetch(g.base.replace(/\/+$/,'')+'/ai/encode-vibe',{
           method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+g.key},
@@ -9623,25 +9797,35 @@ async function buildVibeParams(g){
         const buf=await r.arrayBuffer();
         let bin=''; const u8=new Uint8Array(buf), CH=0x8000;
         for(let k=0;k<u8.length;k+=CH) bin+=String.fromCharCode.apply(null,u8.subarray(k,k+CH));
-        imgs.push(btoa(bin));
+        imgs.push(btoa(bin)); used.push(v);
       }catch(e){
         console.warn('vibe 编码失败，本次跳过 vibe：',e);
         return null;
       }
-    }else imgs.push(stripB64(v.src));
+    }else if(v.src){ imgs.push(stripB64(v.src)); used.push(v); }
   }
+  if(!imgs.length) return null;
   return {
     reference_image_multiple:imgs,
-    reference_information_extracted_multiple:on.map(v=>+v.info||1),
-    reference_strength_multiple:on.map(v=>+v.strength||0.6)
+    reference_information_extracted_multiple:used.map(v=>+v.info||1),
+    reference_strength_multiple:used.map(v=>+v.strength||0.6)
   };
 }
 
-async function generateImage(scene,char){
-  const g=imgCfg();
+async function generateImage(scene,char,opt){
+  opt=opt||{};
+  let g=imgCfg();
+  // 路由：有人物走主后端；没有人物且第二后端开着走第二后端；opt.route 可强制 main / second
+  const useSecond=opt.route==='second'||(opt.route!=='main'&&!char&&img2Ready());
+  if(useSecond){
+    const g2=img2Cfg();
+    g={...g,backend:g2.backend,base:g2.base,key:g2.key,model:g2.model,vibeOn:false,_plain:true};
+  }
   const ep=imgEndpoint(g);
-  if(!ep.base) throw new Error(g.backend==='chat'?'聊天接口地址也没填':'还没配生图地址');
-  const prompt=buildImgPrompt(scene,char), negative=buildImgNegative(char);
+  if(!ep.base) throw new Error(useSecond?'第二后端地址没填':(g.backend==='chat'?'聊天接口地址也没填':'还没配生图地址'));
+  // 第二后端只发画面描述：画师串 / 质量词 / 负向都是给 NAI 那类模型准备的
+  const prompt=g._plain?String(scene||'').trim():buildImgPrompt(scene,char);
+  const negative=g._plain?'':buildImgNegative(char);
 
   if(g.backend==='chat') return await chatImage(ep,g.model,prompt,negative);
 
@@ -9886,6 +10070,11 @@ function renderGen(){
   document.getElementById('genBody').innerHTML=`
     <div class="gpreview">${genCtx.src?`<img src="${esc(genCtx.src)}">`:'还没有图'}
       ${genCtx.busy?`<div class="load"><span class="spin"></span>生成中…</div>`:''}</div>
+    ${img2Cfg().on?`<div class="seg" style="margin:0 0 10px">
+      ${[['auto','自动'],['main','主后端'],['second','第二后端']].map(([k,v])=>
+        `<div class="${(genCtx.route||'auto')===k?'on':''}" onclick="genCtx.scene=(document.getElementById('gen-scene')||{}).value||genCtx.scene;genCtx.route='${k}';renderGen()">${v}</div>`).join('')}
+    </div>
+    <div class="hint" style="margin-top:-4px">自动：选了角色走主后端，没选角色走第二后端。</div>`:''}
     <div class="grouptitle">画面描述　英文 tag</div>
     <div class="group"><div class="field">
       <textarea id="gen-scene" style="min-height:84px"
@@ -9925,7 +10114,7 @@ async function doGenerate(){
   genCtx.busy=true; renderGen();
   try{
     const c=genCtx.charId?characters.find(x=>x.id===genCtx.charId):null;
-    genCtx.src=await generateImage(genCtx.scene,c);
+    genCtx.src=await generateImage(genCtx.scene,c,{route:genCtx.route&&genCtx.route!=='auto'?genCtx.route:undefined});
     genCtx.busy=false; renderGen(); toast('生成好了');
   }catch(e){ genCtx.busy=false; renderGen(); toast('生成失败：'+e.message); }
 }
@@ -10720,6 +10909,7 @@ async function shareJournal(silent){
       const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(x),timestamp:Date.now()};
       if(_pv) row.meta={...row.meta,pov:String(_pv.content||'').slice(0,300)};
       await dbPut('messages',row);
+      if(row.type==='image') genChatImage(row.id);
     }
     pick.shared=true;
     await dbPut('characters',c); characters=await dbAll('characters');
@@ -11331,9 +11521,9 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
     renderLi();
     if(!silent) toast(first?'刷新好了':`新帖 ${fresh.length} · 评论 ${freshC.length} · 私信 ${nd}`+(hid?` · 设私密 ${hid}`:''));
     // 新帖自动配图（公开的、写了 imgDesc 的），一张一张来，失败就停
-    if(imgReady()&&imgCfg().autoPost!==false){
+    if((imgReady()||img2Ready())&&imgCfg().autoPost!==false){
       for(const np of fresh){
-        if(np.private||!np.imgDesc) continue;
+        if(np.private||!np.imgDesc||!imgReadyFor(liPersonOf(np)?1:0)) continue;
         try{ np.img=await generateImage(np.imgDesc,liPersonOf(np)?c:null); await dbPut('characters',c); characters=await dbAll('characters'); renderLi(); }
         catch(e){ toast('配图失败：'+e.message); break; }
       }
@@ -11354,7 +11544,7 @@ const liPersonOf=p=>typeof p.self==='boolean'?p.self:descHasPerson(p.imgDesc);
 /* 给某条帖子生成配图 */
 function liGenImage(i){
   const c=characters.find(x=>x.id===curCharId), p=c.li.posts[i];
-  if(!imgReady()) return toast('先去 设置 → 生图 配一下');
+  if(!imgReadyFor(liPersonOf(p)?1:0)) return toast('先去 设置 → 生图 配一下');
   openGen({charId:liPersonOf(p)?curCharId:null,scene:p.imgDesc||'',acceptText:'用作这条帖子的配图',
     back:()=>{ show('s-li'); renderLi(); },
     onAccept:async(src)=>{
@@ -11838,6 +12028,14 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 - 撤回后对方**看不到内容**，只会看到一条"你撤回了一条消息"的提示
 - 常见玩法：先发一句真心话，紧接着撤回 —— \`["我想你了", {"type":"recall"}]\`
 - **低频使用**，一次对话最多一次，不要每轮都撤`;
+  if(chatCfg(char).charImg!==false) p+=`
+
+# **发照片**
+你可以拍一张照片发给对方，格式：\`{"type":"image","caption":"中文一句话说明这是什么照片","tags":"英文 danbooru tag：画面内容、你此刻的动作表情和穿着、场景、光线，逗号分隔，15 个以内，不要画师名不要质量词","self":true}\`
+- self：照片里有你本人（自拍、镜子里、露出手）填 true；拍的是风景、饭、猫、东西填 false
+- 用在对方要看、剧情里你正在拍东西、或你真想分享的时候；平常聊天不要发
+- **发照片不能代替说话**，数组里还要有正常消息
+- 一轮最多一张`;
   const _liPub=(((char.li||{}).posts)||[]).filter(x=>!x.private);
   if(_liPub.length) p+=`
 
@@ -11992,6 +12190,39 @@ async function doAiRecall(){
   }
 }
 
+/* 角色发的照片：先出占位卡，后台一张张生成，生成完把图填进气泡 */
+const _genQ=[]; let _genBusy=false;
+function genChatImage(id){ _genQ.push(id); if(!_genBusy) runGenQ(); }
+async function runGenQ(){
+  _genBusy=true;
+  while(_genQ.length){
+    const id=_genQ.shift();
+    try{
+      const m=await dbGet('messages',id);
+      if(!m||m.type!=='image'||!m.meta||!m.meta.pending) continue;
+      const c=characters.find(x=>x.id===m.characterId);
+      const person=m.meta.self!==false;
+      if(!c||chatCfg(c).charImg===false||!imgReadyFor(person?1:0)||!m.meta.tags){
+        m.meta.pending=false; await dbPut('messages',m);
+        if(m.characterId===curCharId) await renderChat();
+        continue;
+      }
+      let src=null, err='';
+      try{ src=await generateImage(m.meta.tags,person?c:null); }catch(e){ err=String(e&&e.message||e); }
+      const m2=await dbGet('messages',id); if(!m2) continue;
+      m2.meta={...m2.meta,pending:false};
+      if(src){ m2.meta.src=src; delete m2.meta.genErr; } else m2.meta.genErr=err.slice(0,80);
+      await dbPut('messages',m2);
+      if(m2.characterId===curCharId) await renderChat();
+      if(!src) toast('照片生成失败：'+err.slice(0,60));
+    }catch(e){ console.warn('genChatImage',e); }
+  }
+  _genBusy=false;
+}
+async function retryChatImage(id){
+  const m=await dbGet('messages',id); if(!m||!m.meta||!m.meta.tags) return;
+  m.meta.pending=true; await dbPut('messages',m); await renderChat(); genChatImage(id);
+}
 /* 片段 -> 消息记录；表情包按描述去库里找图 */
 function toMsg(p){
   if(p.type==='sticker'){
@@ -12002,6 +12233,8 @@ function toMsg(p){
   }
   if(p.type==='transfer') return {type:'transfer',content:p.content,
     meta:{amount:p.amount,status:'pending'}};
+  if(p.type==='image') return {type:'image',content:p.content,
+    meta:{real:false,gen:true,tags:p.tags||'',self:!!p.self,pending:true}};
   if(p.type==='voice') return {type:'voice',content:p.content,
     meta:{dur:Math.max(1,Math.round(p.content.length/3.6))}};
   if(p.type==='xsh'){
@@ -12037,6 +12270,11 @@ function normPart(x){
       // emoji 可能是多码位组合，放宽到 8 个字符；太长的当乱输出丢掉
       return e&&e.length<=8
         ?{type:'react',content:e,mid:pick(x.message_id||x.messageId||x.mid||x.to||'')}:null;
+    }
+    if(ty==='image'||ty==='photo'||ty==='picture'){
+      const cap=pick(x.caption||x.content||x.text||x.description), tags=pick(x.tags||x.prompt||x.desc);
+      if(!cap&&!tags) return null;
+      return {type:'image',content:cap||'照片',tags,self:x.self!==false};
     }
     if(ty==='xshare'||ty==='share_post'){
       const t=pick(x.text||x.post); if(!t) return null;
@@ -12390,6 +12628,7 @@ ${_lp?`上一个镜头（你刚才的状态）：「${String(_lp.meta.pov).slice
       const row={id:uid(),characterId:curCharId,role:'assistant',...toMsg(p),timestamp:Date.now()};
       if(it.pov) row.meta={...row.meta,pov:it.pov};
       await dbPut('messages',row);
+      if(row.type==='image') genChatImage(row.id);
       await renderChat();
       await new Promise(r=>setTimeout(r,paceDelay(p.content.length)));
     }
