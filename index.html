@@ -3337,10 +3337,24 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 **同一版顺带的排查开关**（用户报最新版生出来是糊成一团的噪点图，没有 token 复现不了）：生成页加「这张不带 vibe」开关（`opt.noVibe`）用来二分是 vibe 字段的问题还是参数的问题；「上一次实际发给生图接口的内容」多记一份完整请求参数（base64 只留开头和长度），可复制发出来对。
 
+### 2026-09-05（二十三）· 对照官方库补齐 V4 参数：糊图和「不听提示词」的根
+
+用户两张图：带 vibe 糊成一团噪点；不带 vibe 能成型但像没用提示词。去查了 Aedial/novelai-api 的 V4.5 默认预设和 V4 vibe 示例，对着我们发的请求逐项比。
+
+**差异一：缺采样行为字段。** 官方 V4 / V4.5 预设里有 `deliberate_euler_ancestral_bug:false`、`prefer_brownian:true`、`legacy_uc:false`、`autoSmea:false`、`uncond_scale:1`、`inpaintImg2ImgStrength:1`，我们一个都没发。缺前两项时服务端按旧的 euler ancestral 行为跑，出图糊、对提示词的响应差——这和「不带 vibe 也像没用提示词」对得上。现在 V4 系列全部补上，另加空的 `characterPrompts:[]`。
+
+**差异二：V4 的 vibe 不发信息提取数组。** 官方示例 `generate_image_v4_with_vibe.py` 只给 `reference_image_multiple`（编码）和 `reference_strength_multiple`，信息提取在编码里定死。之前默认先发带 info 数组的版本，被 400 后才退到不带的；现在 V4 系列默认就不带，仍保留 400 时换写法的兜底。
+
+**差异三：负向预设。** 「一键填 NovelAI 推荐参数」的负向换成 V4.5 官方 Heavy 预设（nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page）。原来那串是 V3 时代的。
+
+请求的其余项（params_version 3、karras、k_euler_ancestral、scale 5、v4_prompt / v4_negative_prompt 结构、cfg_rescale 0、skip_cfg_above_sigma null）和官方一致。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **接第三方模型接口，先拿官方或成熟客户端的默认预设逐项对** → 缺的字段服务端不会报错，只会悄悄按旧行为跑，表现成「图质量差」这种最难归因的问题。凡是有默认预设文件的接口，把它当清单，一项一项核。
+- **「像没用提示词」不一定是提示词没传** → 提示词明明在请求里，采样参数不对照样出这种图。先排除参数，再怀疑提示词。
 - **自动对齐和「用户按规范做」是两条路，都要留** → 自动裁边适合随手生的图，但会破坏用户精心摆好的位置；给一个固定模板 + 「不裁边」开关，用户愿意按规范做时就能一次到位。
 - **菜单里用不存在的图标名不报错** → `IC('chev')` 查不到就渲染成空 svg，肉眼才发现。新用图标名先查表。
 - **「别写 X」的指令要配「必须写 Y」** → 为了避免重复外貌，禁掉了外貌 tag，结果连主体都没了。删一类信息时要检查这类信息里有没有别处不提供的必需项（主体计数、性别）。
@@ -9935,11 +9949,13 @@ function naiPreset(){
     model:'nai-diffusion-4-5-full',
     w:832,h:1216,steps:28,cfg:5,sampler:'k_euler_ancestral',
     quality:'best quality, very aesthetic, absurdres',
-    negative:'lowres, worst quality, bad anatomy, bad hands, bad proportions, '
-      +'text, watermark, signature, jpeg artifacts, blurry, extra digits, fewer digits'
+    // NAI V4.5 官方 Heavy 负向预设
+    negative:'nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, '
+      +'very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, '
+      +'too many watermarks, negative space, blank page'
   });
   renderImgCfg();
-  toast('已填好，地址和 Key 还得你自己填');
+  toast('已填好（含 V4.5 官方负向预设），地址和 Key 还得你自己填');
 }
 function pickOrder(){
   readImgForm();
@@ -10394,6 +10410,15 @@ async function generateImage(scene,char,opt){
       base.skip_cfg_above_sigma=null;
       base.v4_prompt={caption:{base_caption:prompt,char_captions:[]},use_coords:false,use_order:true};
       base.v4_negative_prompt={caption:{base_caption:negative,char_captions:[]},legacy_uc:false};
+      // 对齐 NAI 官方 V4 / V4.5 默认预设里的这几项。缺 deliberate_euler_ancestral_bug / prefer_brownian
+      // 时服务端按旧的 euler ancestral 行为跑，图会糊、不听提示词
+      base.deliberate_euler_ancestral_bug=false;
+      base.prefer_brownian=true;
+      base.legacy_uc=false;
+      base.autoSmea=false;
+      base.uncond_scale=1;
+      base.inpaintImg2ImgStrength=1;
+      base.characterPrompts=[];
     }else{ base.sm=false; base.sm_dyn=false; }
     // vibe 的参数写法：V4 系列接口校验很严，一种写法 400 就换下一种，最后不带 vibe 再试一次。
     // 哪种成功了记下来（S.img.v4VibeMode），下次直接用
@@ -10403,8 +10428,9 @@ async function generateImage(scene,char,opt){
     if(vibe){
       const full={...vibe,...(isV4?{normalize_reference_strength_multiple:true}:{})};
       if(isV4){
+        // 官方 V4 示例：编码放 reference_image_multiple，强度放 reference_strength_multiple，信息提取已经在编码里，不发
         const noInfo={...full}; delete noInfo.reference_information_extracted_multiple;
-        if((S.img||{}).v4VibeMode==='noinfo') variants.push(noInfo,full); else variants.push(full,noInfo);
+        if((S.img||{}).v4VibeMode==='full') variants.push(full,noInfo); else variants.push(noInfo,full);
       }else variants.push(full);
     }
     variants.push(null);
