@@ -3105,10 +3105,26 @@ EVE 的原句（解码 0x27e6）就一行：
 - 没出图的动态显示一张斜纹占位卡，写着描述，点一下生成；长按动态也有「生成配图 / 换一张配图」
 - lithium 刷新出的新帖同样自动配图（公开的、写了 imgDesc 的），一张一张来，失败就停并提示
 
+### 2026-09-05（八）· NovelAI 到底卡在哪：跨域，不是 Key
+
+用户：我有 NAI 的 token，但上次说不行，有报错。翻了 8 月 30 日的记录，报错是 `Failed to fetch`，浏览器根本没把请求发出去。结论没变：NovelAI 官方接口不返回跨域头，浏览器端的应用**必须**经一个反代，token 对不对都轮不到。
+
+这次做的：
+
+- `nai_proxy.py` 补了 `Access-Control-Allow-Private-Network: true`。页面挂在 GitHub Pages（公网 https）上去连本机 127.0.0.1，Chrome 走 Private Network Access 预检，缺这个头会被拒。新版 Chrome 改成弹一次「允许访问本地网络」的权限框，点允许即可
+- 「测试链接」填的还是官方地址时不再白跑一次请求，直接给三条路：电脑双击 `nai_proxy.py` 填 `127.0.0.1:8788`；手机部署 `novelai-proxy.js`（Cloudflare Worker）；不想折腾就切「聊天接口」后端
+- `Failed to fetch` 的提示按后端分开写，NAI 那条直接给步骤
+
+**没能验证的**：Claude 的浏览器面板对 127.0.0.1 一律 `ERR_BLOCKED_BY_CLIENT`，是面板自己的沙箱策略，不代表 Chrome 的行为。反代本身用 curl 验过 CORS / 预检 / 私网头都对，「公网页面 → 本机反代」这一跳只能在用户真机上点一次测试链接确认。
+
+`启动.py` 那条「页面和反代都走局域网 http」的路不推荐了：换了页面地址就换了 IndexedDB 的源，聊天记录全不在。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「必须反代」说了三次，用户还是没走通** → 每次都停在「给了脚本」，没有一次把「双击它、填这个地址、点测试」写进用户会看到的那个报错框里。方案要放在用户撞墙的那个位置，不是放在项目目录里。
+- **面板里的 `ERR_BLOCKED_BY_CLIENT` 不是产品 bug** → 测试环境有自己的拦截策略，验不了的东西要如实说验不了，不能把沙箱行为当成浏览器行为下结论。
 - **「配好就能用」和「用户真的配得上」是两回事** → NAI 路径代码早就通了，但前提是用户自己部署反代，这一步卡了几个月，等于功能不存在。做接入时要按用户手头实际有的东西（一个聊天中转的地址和 Key）设计最短路径，而不是按最标准的接口。
 - **https 页面连不上局域网 http** → 局域网反代方案在 GitHub Pages 部署下天然不成立，浏览器混合内容拦截。选方案前先对一遍部署形态。
 - **给「东西」配图别带角色外貌词** → 生图提示词一律拼角色固定词，饭照里就会多出个人。凡是画面可能没有角色的场合，要让模型明确说照片里有没有人，再决定拼不拼。
@@ -9041,6 +9057,8 @@ function renderImgCfg(){
       ?'NovelAI 官方接口<b>不返回 CORS 头</b>，浏览器直连一定被拦，必须填反代地址。'
        +'<br>项目目录里的 <code>novelai-proxy.js</code> 是一份 Cloudflare Worker 反代，'
        +'照里面的说明贴上去部署，3 分钟就能拿到可用地址。'
+       +'<br>只在电脑上用的话更简单：双击项目目录里的 <code>nai_proxy.py</code>，地址填 <code>http://127.0.0.1:8788</code>。'
+       +'<br>不想折腾反代：后端切「聊天接口」，用聊天中转里的图像模型。'
        +'<br>Key 要填 <b>persistent API token</b>（<code>pst-</code> 开头），不是网页 session token。'
       :(g.backend==='a1111'?'本地 SD WebUI 需要用 <code>--api --cors-allow-origins=*</code> 启动。'
         :(g.backend==='openai'?'走 <code>POST {地址}/images/generations</code>，返回 b64_json 或 url。'
@@ -9499,6 +9517,10 @@ function renderDiag(){
     +(diagHint?`<div class="diaghint">${diagHint}</div>`:'');
 }
 let diagHint='';
+const NAI_PROXY_HINT=`<b>NovelAI 官方接口不返回跨域头，浏览器直连一定被拦</b>，Key 对也没用，必须经过一个反代。三条路选一条：<br>
+  · <b>电脑上用</b>：双击项目目录里的 <code>nai_proxy.py</code>（黑窗口别关），地址改成 <code>http://127.0.0.1:8788</code>，Key 不变，再点测试。Chrome 第一次可能弹「允许访问本地网络」，点允许。<br>
+  · <b>手机上也要用</b>：按 <code>novelai-proxy.js</code> 文件头的步骤部署一个 Cloudflare Worker（免费，约 3 分钟），把它给的 <code>https://xxx.workers.dev</code> 填进地址，电脑手机都能用。<br>
+  · <b>不想折腾反代</b>：后端切到「聊天接口」，用聊天中转里的图像模型，没有跨域问题。`;
 async function testLink(){
   readImgForm();
   const g=draftImg;
@@ -9511,9 +9533,11 @@ async function testLink(){
   const ep=imgEndpoint(g);
   if(!ep.base){ setDiag(0,'bad',g.backend==='chat'?'聊天接口地址也没填':'没填地址'); return; }
   if(!/^https?:\/\//.test(ep.base)){ setDiag(0,'bad','要以 http:// 或 https:// 开头'); return; }
-  if(g.backend==='novelai'&&/image\.novelai\.net/.test(g.base))
-    setDiag(0,'ok','官方地址（注意跨域）');
-  else setDiag(0,'ok',ep.base.replace(/^https?:\/\//,'').slice(0,26));
+  if(g.backend==='novelai'&&/image\.novelai\.net/.test(ep.base)){
+    setDiag(0,'ok','官方地址'); setDiag(1,'bad','浏览器连不上官方地址');
+    diagHint=NAI_PROXY_HINT; renderDiag(); return;
+  }
+  setDiag(0,'ok',ep.base.replace(/^https?:\/\//,'').slice(0,26));
 
   // 2+3+4：真发一次最小生成
   setDiag(1,'run','请求中…'); setDiag(2,'run',''); setDiag(3,'run','');
@@ -9540,11 +9564,11 @@ async function testLink(){
     if(!code&&/Failed to fetch|NetworkError|load failed/i.test(msg)){
       setDiag(1,'bad','连不上 / 被跨域拦');
       setDiag(2,'',''); setDiag(3,'','');
-      diagHint=`浏览器根本没拿到响应，通常是这两种：<br>
-        1. <b>跨域被拦</b>——NovelAI 官方接口不返回 CORS 头，必须用自己的反代；
-           本地 A1111 要用 <code>--api --cors-allow-origins=*</code> 启动。<br>
-        2. 地址写错或服务没起来。<br>
-        原始错误：${esc(msg)}`;
+      diagHint=`浏览器根本没拿到响应（不是 Key 的问题）。<br>`
+        +(g.backend==='novelai'
+          ?NAI_PROXY_HINT+'<br>反代已经开着还这样的话，多半是地址写错、或者手机连的不是电脑那个地址。'
+          :`1. <b>跨域被拦</b>——本地 A1111 要用 <code>--api --cors-allow-origins=*</code> 启动。<br>2. 地址写错或服务没起来。`)
+        +`<br>原始错误：${esc(msg)}`;
       renderDiag();
       return;
     }
