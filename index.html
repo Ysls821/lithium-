@@ -3362,6 +3362,7 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 - **角色提示词进设置页**：列出每个角色的固定外貌 tag 和额外负向，直接改，写回角色记录（和编辑角色是同一份）
 - **填了就存**：每次重渲染存一次，输入框打字 500ms 后存；「保存」按钮改成「保存并返回」
 - 画师串 textarea 的标签写明「只写画师 tag」，顶部提示「负向单独发，不要粘进正向任何一栏」
+- 用户反馈角色提示词「无法点击选中」：改成和画师串一样的预设式——一排角色名点谁选谁（`S.img.selChar`），只显示选中角色的固定词和额外负向；「拼出来会是这样」用选中角色的真实固定词；「试生成一张」按选中角色生；生成页加「画谁」一栏，随时换角色或选「无」。聊天里发照片不看这个，自动用当前角色
 
 ---
 
@@ -9819,16 +9820,20 @@ function renderImgCfg(){
     </div></div>
     <div class="hint">每套只在选中时拼进正向，切换不会把内容带到另一套。长按名字改名 / 复制 / 删除。</div>
 
-    <div class="grouptitle">角色提示词　${characters.length} 个角色</div>
-    ${characters.length?characters.map(c=>`<div class="group" style="margin-bottom:10px">
-      <div class="cell static" style="padding-bottom:4px"><div class="lbl">${esc(c.name)}</div><small style="color:var(--sub)">聊天 / 生成页选到这个角色时自动带上</small></div>
-      <div class="field"><label>固定外貌 tag</label>
-        <textarea style="min-height:56px" placeholder="1boy, black hair, red eyes, …"
+    <div class="grouptitle">角色提示词　点名字选中</div>
+    <div style="padding:2px 2px 6px">
+      <span class="chip ${!g.selChar?'on':''}" onclick="setImg('selChar','')">无</span>
+      ${characters.map(c=>`<span class="chip ${g.selChar===c.id?'on':''}" onclick="setImg('selChar','${c.id}')">${esc(c.name)}</span>`).join('')}
+    </div>
+    ${(()=>{ const c=characters.find(x=>x.id===g.selChar); if(!c) return `<div class="hint">选一个角色，下面就能改 TA 的固定外貌 tag，「拼出来会是这样」和「试生成一张」都按 TA 来。聊天里发照片时不看这里，自动用当前聊天的角色。</div>`;
+      return `<div class="group">
+      <div class="field"><label>「${esc(c.name)}」的固定外貌 tag　每次生图都会带上</label>
+        <textarea style="min-height:64px" placeholder="1boy, black hair, red eyes, …"
           oninput="charImgSoon('${c.id}','imgPrompt',this.value)">${esc(c.imgPrompt||'')}</textarea></div>
-      <div class="field"><label>这个角色额外的负向　可空</label>
+      <div class="field"><label>「${esc(c.name)}」额外的负向　可空</label>
         <input placeholder="glasses, beard" oninput="charImgSoon('${c.id}','imgNegative',this.value)" value="${esc(c.imgNegative||'')}"></div>
-    </div>`).join(''):`<div class="hint">还没有角色。</div>`}
-    <div class="hint">和「编辑角色」里的是同一份，这里改了那边也变。</div>
+    </div>
+    <div class="hint">和「编辑角色 → 生图固定提示词」是同一份，这里改了那边也变。</div>`; })()}
 
     <div class="grouptitle">提示词顺序</div>
     <div class="group"><div class="cell" onclick="pickOrder()">
@@ -9841,9 +9846,10 @@ function renderImgCfg(){
         ({char:'角色固定词',scene:'画面描述',artist:'画师串',quality:'质量词'})[k.trim()]||k).join(' , '))}</code></div>
 
     <div class="grouptitle">拼出来会是这样</div>
-    ${(()=>{ const part={quality:g.quality,artist:(g.artists.find(a=>a.id===g.activeArtist)||{}).text||'',char:'【角色固定词】',scene:'【画面 tag】'};
+    ${(()=>{ const sc=characters.find(x=>x.id===g.selChar);
+      const part={quality:g.quality,artist:(g.artists.find(a=>a.id===g.activeArtist)||{}).text||'',char:sc?(sc.imgPrompt||'（'+sc.name+' 的固定词是空的）'):'【角色固定词】',scene:'【画面 tag】'};
       const pos=(g.order||'artist,char,scene,quality').split(',').map(k=>(part[k.trim()]||'').trim()).filter(Boolean).join(', ');
-      const neg=[activeNegText(g),'【角色额外负向】'].filter(Boolean).join(', ');
+      const neg=[activeNegText(g),sc?(sc.imgNegative||''):'【角色额外负向】'].filter(Boolean).join(', ');
       return `<div class="group" style="padding:8px 12px;font-size:12.5px;line-height:1.55">
         <div style="color:var(--sub);margin-bottom:2px">正向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(pos)}</div>
         <div style="color:var(--sub);margin:8px 0 2px">负向</div><div style="word-break:break-word;white-space:pre-wrap">${esc(neg)}</div></div>`; })()}
@@ -10783,8 +10789,10 @@ function renderGen(){
     <div class="group"><div class="field">
       <textarea id="gen-scene" style="min-height:84px"
         placeholder="1girl, solo, sitting, guitar, rain, night">${esc(genCtx.scene||'')}</textarea></div></div>
+    <div class="group" style="margin-bottom:10px"><div class="cell" onclick="genPickChar()"><div class="lbl">画谁</div>
+      <div class="val">${c?esc(c.name):'无'}</div>${CHEV}</div></div>
     <div class="hint">角色的固定提示词、画师串、质量词会自动拼在前面。${
-      c&&c.imgPrompt?`<br>当前角色固定词：<code>${esc(c.imgPrompt.slice(0,60))}</code>`:''}</div>
+      c?(c.imgPrompt?`<br>「${esc(c.name)}」固定词：<code>${esc(c.imgPrompt.slice(0,80))}</code>`:`<br><span style="color:var(--danger)">「${esc(c.name)}」的固定词是空的，去生图设置或编辑角色填。</span>`):''}</div>
     ${genCtx.charId?`<button class="btn ghost" onclick="autoScene()">让 TA 想一个画面</button>`:''}
     <button class="btn" onclick="doGenerate()">生成</button>
     ${genCtx.src?`<button class="btn ghost" onclick="acceptGen()">${esc(genCtx.acceptText||'保存')}</button>`:''}
@@ -10830,8 +10838,15 @@ async function acceptGen(){
   if(fn) await fn(src,cap);
 }
 function testGen(){
-  readImgForm(); S.img={...draftImg};
-  openGen({scene:'1girl, solo, upper body, looking at viewer',back:()=>show('s-imgset')});
+  readImgForm(); S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
+  const c=characters.find(x=>x.id===S.img.selChar);
+  openGen({charId:c?c.id:null,scene:c?'solo, upper body, looking at viewer':'1girl, solo, upper body, looking at viewer',back:()=>show('s-imgset')});
+}
+/* 生成页里换角色（换成谁就拼谁的固定词；「无」= 不拼角色词） */
+function genPickChar(){
+  genCtx.scene=(document.getElementById('gen-scene')||{}).value||genCtx.scene;
+  actionSheet('这张图画谁',[{t:'无　不拼角色固定词',cur:!genCtx.charId,fn:()=>{ genCtx.charId=null; renderGen(); }},
+    ...characters.map(c=>({t:c.name,av:c.avatar,cur:genCtx.charId===c.id,fn:()=>{ genCtx.charId=c.id; renderGen(); }}))]);
 }
 
 /* ============================================================
