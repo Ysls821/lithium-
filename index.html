@@ -11,6 +11,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">   <!-- 图床防盗链：不带 Referer 去拿图，绝大多数图床放行空 Referer -->
 <title>小手机</title>
 <style>
 :root{
@@ -3524,6 +3525,8 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 用户：表情包能不能用文字链接（图床链接）导入。
 
 设置 → 表情包 → 「导入图床链接」展开一个文本框，一行一个：`描述 链接`、`描述|链接`、markdown 的 `![描述](链接)`、或纯链接（用文件名当描述）。每条走 `shrinkSticker`：能跨域画到 canvas 的缩成 240px 本地图存起来，图床挂了也在；不让跨域的原样存链接，显示照常只是离线看不到。同名同图跳过，导入结果 toast 里分开报「只存了链接」的张数。
+
+用户导入后图全是坏的。最常见原因是图床防盗链：图片被 ysls821.github.io 引用时带 Referer，图床看不是自家域名就拒绝。页面加 `<meta name="referrer" content="no-referrer">`，缩图用的 Image 也设 `referrerPolicy='no-referrer'`——绝大多数图床放行空 Referer。剩下的情况（图床本身要梯子 / 链接不是直链）要拿具体链接测。
 
 ---
 
@@ -8031,6 +8034,7 @@ function importStickers(){
 function shrinkSticker(src){
   return new Promise(res=>{
     const img=new Image();
+    img.referrerPolicy='no-referrer';
     if(!String(src).startsWith('data:')) img.crossOrigin='anonymous';
     img.onload=()=>{
       try{
