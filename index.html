@@ -184,7 +184,7 @@ body{background:#0A0A0C;color:var(--text);
 #s-chat.hasbg .navbar,#s-chat.hasbg #chatInputBar,#s-chat.hasbg #quoteBar,#s-chat.hasbg #selectBar{
   background:var(--bar)!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 /* 非沉浸：状态栏和聊天顶栏都用同一个实色 --bar，不再各自半透明压在不同底色上 */
-#phone:not(.imm):not(.himm) #statusbar,#phone:not(.imm):not(.himm) #s-chat .navbar{
+#phone:not(.imm):not(.himm):not(.pimm) #statusbar,#phone:not(.imm):not(.himm) #s-chat .navbar{
   background:var(--bar);-webkit-backdrop-filter:none;backdrop-filter:none}
 
 /* ── 沉浸模式：背景通栏，上下栏浮在图上 ──
@@ -3528,10 +3528,29 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 用户导入后图全是坏的。最常见原因是图床防盗链：图片被 ysls821.github.io 引用时带 Referer，图床看不是自家域名就拒绝。页面加 `<meta name="referrer" content="no-referrer">`，缩图用的 Image 也设 `referrerPolicy='no-referrer'`——绝大多数图床放行空 Referer。剩下的情况（图床本身要梯子 / 链接不是直链）要拿具体链接测。
 
+### 2026-09-07（一）· 拍一拍 / 会话内换身份 / 角色手机白顶栏 / 生成页报错完整显示
+
+用户报四条：X 生图挂了梯子也失败（没报错原文）；想要聊天里双方「拍一拍」带后缀；非沉浸模式进 TA 的手机，顶上多一条白色顶栏；想在会话里换 user 身份。
+
+**拍一拍**
+
+- 消息类型 `pat`，渲染成居中系统行「你拍了拍 姬照 的小脑袋」/「姬照拍了拍你 的肩膀」。后缀两边各自填：编辑角色 → 「拍一拍后缀」（`c.patSuffix`），编辑身份 → 人设下面（`p.patSuffix`）
+- 你拍 TA：**双击 TA 的头像**。头像原来单击是看镜头，改成 `avTap`：380ms 内第二下就是拍一拍，否则才打开镜头。拍完自动叫 TA 回一轮（`askAI`），手机会震一下
+- TA 拍你：提示词功能段加「拍一拍」，回 `{"type":"pat"}`，规则和贴表情一样——不能只拍不说话、一轮最多一次。`normPart` 认 pat / nudge / poke
+- 历史里 `msgBody` 写成 `[你拍了拍姬照的小脑袋]` / `[姬照拍了拍你的肩膀]`，模型能接着反应
+
+**会话内换身份**：聊天设置最上面加「这段聊天里我是」，点开选一个身份，只改这个角色绑定的 `personaId`，TA 立刻用新身份的名字、人设、头像来对你。原来只能去编辑角色里改。
+
+**角色手机的白顶栏**：上一版为了顶栏同色加的 `#phone:not(.imm):not(.himm) #statusbar{background:var(--bar)}`，优先级压过了角色手机页的 `#phone.pimm #statusbar{transparent}`，进 TA 的手机时状态栏变成实色白条。规则加 `:not(.pimm)`。
+
+**生成页报错**：失败时不再只弹一条截断的 toast，完整报错显示在预览图下面，带「复制报错」。用户说 X 生图失败但没说报错内容，下次能直接贴。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **加 CSS 规则时对着 `:not()` 数一遍优先级** → `:not(.a):not(.b)` 把两个类的权重都算进去，轻松压过别处一个类的覆盖规则。给某个模式写例外时，其他模式的例外都要重新过一遍。
+- **头像单击和双击共用一个手势要延迟单击** → 直接双击会先触发一次单击的动作（弹镜头）。用 380ms 延迟单击、双击时取消，才能两个都保住。
 - **同一套样式不能同时服务「有图」和「没图」** → 玻璃、阴影、留边这些是给叠在图上准备的，实色页面上全是负担。按沉浸 / 非沉浸拆成两套，和顶栏那次是同一个道理。
 - **别拿样例数据当产品名** → 做功能时手边只有一个角色，顺手把她的账号名当成了软件名，一直没人发现。凡是「这个角色的」东西都要和「这个软件的」分开命名。
 - **示范比规则强** → 提示词里写「至少两三条」，历史里却每轮只有一句，模型一定跟历史走。凡是要模型延续的格式，历史里就得按那个格式呈现，不能只靠一句规则。
@@ -5548,6 +5567,11 @@ function editChar(id){
       <input id="f-xname" value="${esc(c.xname||'')}" placeholder="例如：某个网名，留空就用角色名"></div></div>
     <div class="hint">留空就用角色名。你可以在「X」这个 App 里看到所有角色的账号。</div>
 
+    <div class="grouptitle">拍一拍后缀</div>
+    <div class="group"><div class="field"><label>你拍了拍「${esc(c.name||'TA')}」＿＿＿</label>
+      <input id="f-pat" value="${esc(c.patSuffix||'')}" placeholder="的小脑袋"></div></div>
+    <div class="hint">聊天里双击 TA 的头像就是拍一拍，TA 也会拍你。你自己被拍时的后缀在「我的身份」里填。</div>
+
     <div class="grouptitle">生图固定提示词</div>
     <div class="group">
       <div class="field"><label>这个角色的外貌 tag　每次生图都会带上</label>
@@ -5702,6 +5726,7 @@ async function saveChar(){
     bio:document.getElementById('f-bio').value,
     xname:((document.getElementById('f-xname')||{}).value||'').trim(),
     frame:draftFrame||'',
+    patSuffix:((document.getElementById('f-pat')||{}).value||'').trim().slice(0,20),
     imgPrompt:(document.getElementById('f-imgp')||{}).value||'',
     imgNegative:(document.getElementById('f-imgn')||{}).value||'',
     greeting:document.getElementById('f-greeting').value,
@@ -5751,7 +5776,9 @@ function editPersona(id){
         </select></div></div>
     <div class="grouptitle">人设</div>
     <div class="group"><div class="field">
-      <textarea id="u-persona" placeholder="你在角色眼里是谁：身份、性格、你们的关系…">${esc(p.persona||'')}</textarea></div></div>
+      <textarea id="u-persona" placeholder="你在角色眼里是谁：身份、性格、你们的关系…">${esc(p.persona||'')}</textarea></div>
+      <div class="field"><label>拍一拍后缀　TA 拍了拍你＿＿＿</label>
+        <input id="u-pat" value="${esc(p.patSuffix||'')}" placeholder="的肩膀"></div></div>
     <div class="hint">可以留空。同一个人可以建多个身份，比如「同事眼中的我」和「恋人眼中的我」。</div>
     ${id?`<div class="hint" style="margin-top:-8px">当前有 <b>${used}</b> 个角色绑定了这个身份。</div>`:''}
     <button class="btn" onclick="savePersona()">保存</button>
@@ -5765,6 +5792,7 @@ async function savePersona(){
   if(!name) return toast('名字不能为空');
   const old=editingUserId?personas.find(x=>x.id===editingUserId):null;
   const p={...(old||{}), id:editingUserId||uid(), name, avatar:draftAvatar, frame:draftFrame||'',
+    patSuffix:((document.getElementById('u-pat')||{}).value||'').trim().slice(0,20),
     persona:document.getElementById('u-persona').value,
     gender:document.getElementById('u-gender').value||'',
     createdAt:old?old.createdAt:Date.now()};
@@ -7044,6 +7072,8 @@ async function renderChat(toBottom){
     if(day!==lastDay){ lastDay=day; sep=`<div class="daysep">${fmtTime(m.timestamp)}</div>`; }
     if(m.type==='scene'){ html+=sep+`<div class="daysep scene">— ${esc(m.content)} —</div>`; return; }
     const isMe=m.role==='user';
+    if(m.type==='pat')
+      return sep+`<div class="sysline pat">${isMe?'你':esc(c.name)}拍了拍${isMe?esc(c.name):'你'}${esc(isMe?(c.patSuffix||''):(me.patSuffix||''))}</div>`;
     if(m.recalled)
       return sep+`<div class="sysline" data-lp="recallMenu" data-lpid="${m.id}"
         ${selectMode?'':`onclick="peekRecalled('${m.id}')"`}>
@@ -7056,7 +7086,7 @@ async function renderChat(toBottom){
     return sep+`<div class="msg ${isMe?'me':''}${hasR}" data-lp="msgMenu" data-lpid="${m.id}"
       ${selectMode?`onclick="toggleSel('${m.id}')"`:''}>
       <span class="selbox ${selected.has(m.id)?'on':''}"></span>
-      <div class="av${isMe?'':' pv'}" ${isMe?'':`onclick="event.stopPropagation();showPov('${m.id}')"`}>${avatarHTML(isMe?me.avatar:c.avatar)}</div>
+      <div class="av${isMe?'':' pv'}" ${isMe?'':`onclick="event.stopPropagation();avTap('${m.id}')"`}>${avatarHTML(isMe?me.avatar:c.avatar)}</div>
       <div class="msgwrap"><span class="bwrap">${q?`<div class="bubble" style="font-size:${cfg.fontSize}px;${
         isMe?(cfg.bubbleMe?`background:${cfg.bubbleMe};color:#fff`:''):(cfg.bubbleTa?`background:${cfg.bubbleTa};color:#fff`:'')}">${q}${esc(m.content)}</div>`
         :bubbleHTML(m,cfg,isMe)}${rc}</span></div>
@@ -7502,7 +7532,10 @@ function renderChatSet(){
       <div class="main" style="flex:1;min-width:0">
         <div class="name" style="font-size:16px;font-weight:600">${esc(c.name)}</div>
         <div class="desc" style="font-size:13px;margin-top:2px">编辑设定、头像、身份、世界书</div>
-      </div>${CHEV}</div></div>
+      </div>${CHEV}</div>
+      <div class="cell" onclick="switchPersonaInChat()"><div class="lbl">这段聊天里我是</div>
+        <div class="val">${esc((personas.find(p=>p.id===c.personaId)||personas[0]||{name:'（没有身份）'}).name)}</div>${CHEV}</div></div>
+    <div class="hint">换身份只影响这个角色：TA 会用新身份的名字、人设、头像来对你。</div>
 
 
     <div class="secband">外观</div>
@@ -7878,6 +7911,15 @@ function paintBubblePreview(){
   });
 }
 
+/* 聊天设置里直接换这个角色绑定的身份 */
+function switchPersonaInChat(){
+  const c=characters.find(x=>x.id===curCharId); if(!c) return;
+  if(!personas.length) return toast('还没有身份，去 角色 → 我的身份 建一个');
+  actionSheet('这段聊天里我是',personas.map(p=>({t:p.name,av:p.avatar,cur:c.personaId===p.id,fn:async()=>{
+    c.personaId=p.id; await dbPut('characters',c); characters=await dbAll('characters');
+    renderChatSet(); toast('已切换成「'+p.name+'」');
+  }})));
+}
 function setCfg(k,v,silent){
   draftCfg[k]=v;
   if(k==='chatBg') draftChatBg=v;
@@ -11201,6 +11243,8 @@ function renderGen(){
   document.getElementById('genBody').innerHTML=`
     <div class="gpreview">${genCtx.src?`<img src="${esc(genCtx.src)}" onclick="openViewer(genCtx.src)" style="cursor:zoom-in">`:'还没有图'}
       ${genCtx.busy?`<div class="load"><span class="spin"></span>生成中…</div>`:''}</div>
+    ${genCtx.err?`<div class="group" style="padding:8px 12px;font-size:12.5px;color:var(--danger);word-break:break-word;white-space:pre-wrap">${esc(genCtx.err)}
+      <div style="margin-top:6px"><button class="mini" onclick="navigator.clipboard?.writeText(genCtx.err).then(()=>toast('已复制'))">复制报错</button></div></div>`:''}
     ${img2Cfg().on?`<div class="seg" style="margin:0 0 10px">
       ${[['auto','自动'],['main','主后端'],['second','第二后端']].map(([k,v])=>
         `<div class="${(genCtx.route||'auto')===k?'on':''}" onclick="genCtx.scene=(document.getElementById('gen-scene')||{}).value||genCtx.scene;genCtx.route='${k}';renderGen()">${v}</div>`).join('')}
@@ -11247,12 +11291,12 @@ async function doGenerate(){
   const ta=document.getElementById('gen-scene');
   if(ta) genCtx.scene=ta.value;
   if(!genCtx.scene.trim()) return toast('先写点画面描述');
-  genCtx.busy=true; renderGen();
+  genCtx.busy=true; genCtx.err=null; renderGen();
   try{
     const c=genCtx.charId?characters.find(x=>x.id===genCtx.charId):null;
     genCtx.src=await generateImage(genCtx.scene,c,{route:genCtx.route&&genCtx.route!=='auto'?genCtx.route:undefined,noVibe:!!genCtx.noVibe,source:'gen',charId:c?c.id:''});
     genCtx.busy=false; renderGen(); toast('生成好了');
-  }catch(e){ genCtx.busy=false; renderGen(); toast('生成失败：'+e.message); }
+  }catch(e){ genCtx.busy=false; genCtx.err=String(e&&e.message||e); renderGen(); toast('生成失败，报错在预览下面'); }
 }
 async function acceptGen(){
   if(!genCtx.src) return;
@@ -13172,7 +13216,13 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 - 用在：说错话、后悔、觉得太肉麻、想改口、故意欲盖弥彰
 - 撤回后对方**看不到内容**，只会看到一条"你撤回了一条消息"的提示
 - 常见玩法：先发一句真心话，紧接着撤回 —— \`["我想你了", {"type":"recall"}]\`
-- **低频使用**，一次对话最多一次，不要每轮都撤`;
+- **低频使用**，一次对话最多一次，不要每轮都撤
+
+# **拍一拍**
+你可以拍一拍对方，像微信那样，格式：\`{"type":"pat"}\`。对方会看到「${char.name}拍了拍你${(me.patSuffix||'')}」。
+- 用在想引起注意、撒娇、无语、催回复的时候；对方拍了你，你也可以拍回去
+- **不能只拍不说话**，数组里还要有正常消息
+- 低频，一轮最多一次`;
   if(chatCfg(char).charImg!==false) p+=`
 
 # **发照片**
@@ -13431,6 +13481,24 @@ async function retryChatImage(id){
   if(m.meta.genErr&&!confirm('上次失败：'+m.meta.genErr+'\n\n再试一次？')) return;
   m.meta.pending=true; await dbPut('messages',m); await renderChat(); genChatImage(id);
 }
+/* ---------- 拍一拍：双击 TA 的头像 = 你拍了拍 TA；模型回 {"type":"pat"} = TA 拍了拍你 ---------- */
+let _avTap={id:null,t:0,timer:null};
+function avTap(id){
+  const now=Date.now();
+  if(_avTap.id===id&&now-_avTap.t<380){
+    clearTimeout(_avTap.timer); _avTap={id:null,t:0,timer:null};
+    patChar(); return;
+  }
+  clearTimeout(_avTap.timer);
+  _avTap={id,t:now,timer:setTimeout(()=>{ _avTap={id:null,t:0,timer:null}; showPov(id); },380)};
+}
+async function patChar(){
+  const c=characters.find(x=>x.id===curCharId); if(!c||sending) return;
+  await dbPut('messages',{id:uid(),characterId:curCharId,role:'user',type:'pat',content:'',meta:{},timestamp:Date.now()});
+  await renderChat();
+  try{ navigator.vibrate&&navigator.vibrate(25); }catch(e){}
+  askAI();   // 拍完让 TA 反应一下
+}
 /* 片段 -> 消息记录；表情包按描述去库里找图 */
 function toMsg(p){
   if(p.type==='sticker'){
@@ -13439,6 +13507,7 @@ function toMsg(p){
     return st?{type:'sticker',content:st.name,meta:{src:st.src}}
              :{type:'text',content:'['+p.content+']',meta:{}};
   }
+  if(p.type==='pat') return {type:'pat',content:'',meta:{}};
   if(p.type==='transfer') return {type:'transfer',content:p.content,
     meta:{amount:p.amount,status:'pending'}};
   if(p.type==='image') return {type:'image',content:p.content,
@@ -13463,6 +13532,7 @@ function normPart(x){
     if(ty==='sticker'||ty==='emoji')
       { const c=pick(x.description||x.content||x.name); return c?{type:'sticker',content:c}:null; }
     if(ty==='recall') return {type:'recall',content:''};
+    if(ty==='pat'||ty==='nudge'||ty==='poke') return {type:'pat',content:''};
     if(ty==='transfer'){
       const amt=Math.round(parseFloat(x.amount)*100)/100;
       return amt>0?{type:'transfer',content:String(x.note||x.content||'转账').trim(),amount:amt}:null;
@@ -13736,6 +13806,10 @@ function msgToText(m){
   return q+msgBody(m)+rc;
 }
 function msgBody(m){
+  if(m.type==='pat'){
+    const c=characters.find(x=>x.id===m.characterId)||{}; const me=(c.id?personaOf(c):null)||{};
+    return m.role==='user'?`[你拍了拍${c.name||'TA'}${c.patSuffix||''}]`:`[${c.name||'TA'}拍了拍你${me.patSuffix||''}]`;
+  }
   if(m.type==='image'){
     if(m.meta&&m.meta.real) return m.content?`[图片]${m.content}`:'[图片]';
     return m.content?`[图片：${m.content}]`:'[对方发来一张图片，你看不到内容，可以问问是什么]';
