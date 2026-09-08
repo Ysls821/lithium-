@@ -3631,10 +3631,32 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 模拟验证：让主动开口一直失败，45 分钟内新逻辑调 3 次（第 0、10、30 分钟），旧逻辑约 40 次。
 
+### 2026-09-08（二）· 后台间隔改成管「多久尝试一次」
+
+上一条修的是失败退避，用户接着质疑：「不应该是我设定的 30 分钟，他在线时 30 分钟才调用一次吗？」
+
+她说得对，退避只是止血，根子在**间隔的语义**。原来 `proactiveTick` 的条件是「**最后一条消息**距今超过 proMinutes」——这管的是「多久成功一次」：成功了会写进一条新消息，时间戳自然往后推；失败什么都不写，条件就永远成立。所以设 30 分钟，实际是每 67 秒试一次，只要它一直失败。
+
+**改法**：加 `bgTry(c,key)` / `bgDue(c,key,ms)`，每次**尝试**（不管成没成）都往 `c.bgTry[key]` 记一个时间戳，下一次必须等够用户设的间隔。四个按时间触发的任务全接上：
+
+| 任务 | 尝试间隔取自 |
+|---|---|
+| 主动开口 | 「多久没动静就主动开口」那个分钟数 |
+| X 小号私信 | 「隔多少小时」 |
+| 主动讲今天的事 | 安静 20 分钟 |
+| 起居注自动更新 | 「每隔 N 小时」，没设就 10 分钟 |
+
+记忆和摘要是按轮触发的，闲置时轮数不涨，本来就不会重复，保持不动。
+
+失败退避留着，叠在尝试间隔之上：两个条件都满足才会真的调。模拟设 30 分钟且一直失败，3 小时内调 5 次（第 0、30、60、100、180 分钟），旧逻辑约 160 次。
+
+顺带回答用户另一个问题：**时间感知一直是有的**（设置里的开关，默认开）。`timeContext()` 往提示词里注入当前年月日、星期、季节、时段，以及「用户上次回复是多久以前」。她真正问的是定时器有没有尊重她设的间隔——之前确实没有，现在有了。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「间隔」要写清是间隔什么** → `proMinutes` 实际语义是「距上一条消息多久」，用户理解的是「多久试一次」。两者在成功路径上等价，一失败就分道扬镳。写周期性任务时，间隔的锚点应该是**上次尝试**，业务状态只用来判断该不该做。
 - **后台任务的「要不要干活」判据，绝不能只看业务状态** → 六个 tick 全部踩同一个坑：失败 → 状态不推进 → 下一轮条件依然成立 → 无限重试。凡是定时触发的活，除了业务状态还必须记一个「上次尝试过了」，否则失败就是死循环烧钱。
 - **`if(!x) return;` 是这类死循环最常见的入口** → 早退时把该更新的计数、时间戳、日志全跳过了，看起来只是"这次没做"，实际是"下次还会再来"。写早退前先问：这条路径上有没有本该推进的状态？
 - **静默失败要有露头的地方** → 用户能发现是因为看了服务商后台。应用自己一个字都没说。后台任务的失败状态必须在界面上有一处能看到，否则修好一个还会有下一个。
@@ -6579,6 +6601,14 @@ function mountedMemText(char){
 const BG_NAMES={pro:'主动开口',mem:'提取记忆',sum:'滚动摘要',
   journal:'起居注自动更新',share:'主动讲今天的事',xdm:'X 小号主动私信'};
 const bgCool=(c,k)=>{ const b=(c.bgFail||{})[k]; return !!(b&&Date.now()<b.until); };
+/* 用户设的间隔管的是「多久**尝试**一次」。原来只看「上一条消息多久以前」，
+   失败不产生消息 -> 条件永远成立 -> 每个 tick 都试。现在每次尝试都记时间戳，
+   不管成没成，下一次都要等够同样的间隔。 */
+const bgDue=(c,k,ms)=>Date.now()-(((c.bgTry||{})[k])||0)>=ms;
+async function bgTry(c,k){
+  c.bgTry={...(c.bgTry||{}),[k]:Date.now()};
+  await dbPut('characters',c); characters=await dbAll('characters');
+}
 async function bgFail(c,k,err){
   const f={...(c.bgFail||{})}, prev=f[k]||{n:0};
   const n=Math.min((prev.n||0)+1,5);
@@ -6673,6 +6703,8 @@ function renderSettings(){
     </div>
     <div class="hint">这些后台任务失败了，已经<b>自动暂停</b>，不会再每分钟重试烧额度。
       到点会再试一次；一直失败就去把对应的开关关掉。</div>`:''}
+    <div class="hint">后台任务的间隔管的是<b>多久尝试一次</b>：你把主动开口设成 30 分钟，
+      它就最多 30 分钟试一次，成没成都一样等。连续失败还会在这之上再退避（10 分钟起，翻倍，封顶 2 小时）。</div>
     <div class="hint">每发出去一个请求就 +1，包括 429 之后的自动重试、后台定时器、TA 手机里的刷新。
       过零点清零。<b>想省次数</b>：聊天设置里关掉「模型忘了就补一次」、打开「让聊天模型直接写英文 tag」，
       手机设置里开着「合并成一次调用」，再把「自动提取记忆」的条数调大一点。</div>
@@ -8146,7 +8178,9 @@ async function proactiveTick(){
     if(!ms.length) continue;
     const last=ms[ms.length-1];
     if(Date.now()-last.timestamp < g.proMinutes*60000) continue;
-    if(bgCool(c,'pro')) continue;          // 刚失败过，退避中
+    if(!bgDue(c,'pro',g.proMinutes*60000)) continue;   // 上次尝试还没满你设的间隔
+    if(bgCool(c,'pro')) continue;          // 连续失败，额外退避
+    await bgTry(c,'pro');
     let ok=false;
     try{ ok=await proactiveSend(c,ms,g); }
     catch(e){ await bgFail(c,'pro',e); break; }
@@ -12452,8 +12486,10 @@ async function journalTick(){
     if(!ms.length) continue;
     // 至少安静 20 分钟才考虑，避免打断正在进行的对话
     if(Date.now()-ms[ms.length-1].timestamp<20*60000) continue;
+    if(!bgDue(c,'share',20*60000)) continue;
     if(Math.random()*100>(g.journalRate||20)) continue;
     if(bgCool(c,'share')) continue;
+    await bgTry(c,'share');
     const keep=curCharId; curCharId=c.id;
     let ok=false;
     try{ ok=await shareJournal(true); }catch(e){ ok=false; }
@@ -12478,8 +12514,10 @@ async function xDmTick(){
     const ms=await msgsOf(c.id);
     if(!ms.length) continue;
     if(Date.now()-ms[ms.length-1].timestamp<30*60000) continue;   // 正聊着就别插一脚
+    if(!bgDue(c,'xdm',(g.xdmHours||6)*3600e3)) continue;
     if(Math.random()*100>(g.xdmRate||15)) continue;
     if(bgCool(c,'xdm')) continue;
+    await bgTry(c,'xdm');
     xDmBusy=true;
     let ok=false;
     try{ ok=await xDmSend(c); }catch(e){ ok=false; }
@@ -12538,7 +12576,9 @@ async function journalAutoTick(){
     if(!due) continue;
     const ms=await msgsOf(c.id);
     if(!ms.length) continue;          // 没聊过就没素材，别硬编
+    if(!bgDue(c,'journal',every?every*3600e3:10*60000)) continue;
     if(bgCool(c,'journal')) continue;
+    await bgTry(c,'journal');
     jAutoBusy=true;
     const keep=curCharId; curCharId=c.id;
     try{
