@@ -3545,10 +3545,38 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 **生成页报错**：失败时不再只弹一条截断的 toast，完整报错显示在预览图下面，带「复制报错」。用户说 X 生图失败但没说报错内容，下次能直接贴。
 
+### 2026-09-08（二）· 省调用：总刷新 8 次并成 1 次 / POV 不再偷偷补 / 照片可以一步出 tag / 调用计数
+
+用户按次计费，发现额度掉得飞快，让我列出「什么都会调一次」。列完发现三个大头：总刷新一次 8 调用、每张照片 2 调用（中文描述 + 转 tag）、POV 模型漏了就自动补一次。她指出总刷新「完全可以 8 个一次性进行」。
+
+**总刷新合并成一次调用**（手机设置 → 总刷新范围 → 合并成一次调用，默认开）
+
+- 原来 `refreshAll` 是个 for 循环，勾几项就顺着调几次。现在把勾中的几块拼进**同一个提示词**，模型吐一个大 JSON，`{status, journal, chats, li, follows, shop, diary, mood}`
+- 没有重写那 8 个函数的解析和写库逻辑——给每个加了第二个参数 `pre`：给了就跳过自己那次 API，直接拿这段现成的 JSON 往下走。`refreshStatus(true, j.status)` 就是原来那条路的后半截
+- 模型漏了哪块、给成空数组、类型不对，那块就**保持原样**，绝不偷偷补一次调用（按次计费上，静默回退比缩水更伤）。toast 会说「6/8 项到手，日记、心情 模型没给」
+- 合并模式下 X 刷新不再为新帖单独拉一次评论（那是第 9 次调用）；新帖配图照常，那走的是生图额度不是聊天额度
+- 提示词里加了「每块之间要对得上」——日记提到的事，起居注和 X 上该找得到影子。分开调时各聊各的，合并反而更容易一致
+- 块数越多单块越容易缩水，觉得质量掉了就把开关关掉，回到一项一次
+
+**POV 补拍改成默认不补**（聊天设置 → 第三视角镜头 → 模型忘了就补一次）
+
+镜头本来就是跟正文**一起**回来的（提示词要求数组里每条消息后面跟一个 pov 对象），不额外花调用。只有模型一个镜头都没给时，原来会**自动再调一次**单独补拍——用户一直以为主回复+POV 是一次，其实模型偷懒时就是两次。现在这个补拍是开关，默认关：这轮没镜头就没镜头。
+
+**照片可以一步出 tag**（聊天设置 → TA 发照片 → 让聊天模型直接写英文 tag）
+
+默认还是两步（聊天模型写中文描述 → `descToTags` 单独调一次转英文），每张照片 2 次聊天调用。打开开关后提示词直接要 `"tags":"英文 danbooru tag"`，`runGenQ` 本来就有「已经是英文就不转」的判断，于是自动省掉那次。顺序和规则照搬 `descToTags`：主体 → 背景 → 动作 → 穿着，填了固定外貌词就一个外貌词都不写。
+
+**调用计数**（设置 → 接口与 API → 今天用了多少次）
+
+`callAPI` 和 `generateImageRaw` 各记一笔，聊天 / 生图分开，过零点清零并把前一天的数留一行。429 之后的自动重试也算——它确实是又发了一次请求。这是唯一能验证「到底省没省」的数字。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「一次功能」不等于「一次调用」** → 总刷新 8 项、照片 2 步、POV 补拍，界面上都是点一下，账单上是 8 次 / 2 次 / 2 次。按次计费的 API 上，每加一个「自动帮你补一下」的贴心设计都是在花钱，要么并进同一次请求，要么给开关。
+- **合并请求不要重写下游** → 给原函数加一个「结果已经有了」的入参（`pre`），跳过它自己那次 API，解析和写库全都不动。比抽出 8 个 apply 函数安全得多，回滚也只是删一个参数。
+- **拿不到就保持原样，不要自动补** → 合并调用缺了某块时，「那就单独再调一次」看着体贴，实际上把 1 次悄悄变回 8 次。宁可 toast 告诉用户哪块没给。
 - **加 CSS 规则时对着 `:not()` 数一遍优先级** → `:not(.a):not(.b)` 把两个类的权重都算进去，轻松压过别处一个类的覆盖规则。给某个模式写例外时，其他模式的例外都要重新过一遍。
 - **头像单击和双击共用一个手势要延迟单击** → 直接双击会先触发一次单击的动作（弹镜头）。用 380ms 延迟单击、双击时取消，才能两个都保住。
 - **同一套样式不能同时服务「有图」和「没图」** → 玻璃、阴影、留边这些是给叠在图上准备的，实色页面上全是负担。按沉浸 / 非沉浸拆成两套，和顶栏那次是同一个道理。
@@ -3765,7 +3793,7 @@ const DEFAULT_SETTINGS={
   userName:'我', userPersona:'', timeAware:true, banNarration:true,
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
-  memAuto:true, memEvery:12,
+  memAuto:true, memEvery:12, rfMerge:true,
   homeBg:'', homeImm:true, mmCover:'', xposts:[], glassMode:'mix', weather:{mode:'',i:.5,chat:false},
   kbMode:'auto',
   oracle:{mode:'watcher',text:''},
@@ -3792,11 +3820,11 @@ const DEFAULT_CHAT={
   bubbleMe:'', bubbleTa:'', fontSize:15.5,
   chatBg:'', immersive:true, setImmersive:false, showInject:false, historyCount:0,
   histMode:'turn', histTurns:0,
-  journalShare:false, journalRate:20, presetId:'', povEnabled:false, memAuto:true, noScrim:false,
+  journalShare:false, journalRate:20, presetId:'', povEnabled:false, povFix:false, memAuto:true, noScrim:false,
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   memCore:0, memEpisodic:0, memEvery:0,      // 0=跟随全局
   xdmEnabled:false, xdmRate:15, xdmHours:6,
-  avatarRadius:50, avatarSize:34, bubbleRadius:20, textMe:'', textTa:'', charImg:true,
+  avatarRadius:50, avatarSize:34, bubbleRadius:20, textMe:'', textTa:'', charImg:true, imgTagDirect:false,
   proEnabled:false, proMinutes:60, proDaily:5,
   sceneMode:'online',         // online=隔着手机  offline=面对面
   styleExamples:''            // 角色专属风格示例，空=用全局的
@@ -6503,6 +6531,17 @@ function renderSettings(){
     <button class="btn ghost" id="s-test" onclick="testConnection()">测试连接</button>
     <div class="hint" id="testResult">地址填到 <code>/v1</code> 为止。测试会真的发一次最小请求，能验出 Key、模型名和网络是否都对。</div>
 
+    <div class="grouptitle">今天用了多少次</div>
+    <div class="group">
+      <div class="cell static"><div class="lbl">聊天接口</div><div class="val">${apiStat().chat} 次</div></div>
+      <div class="cell static"><div class="lbl">生图接口</div><div class="val">${apiStat().img} 次</div></div>
+      ${(apiStat().yChat||apiStat().yImg)?`<div class="cell static"><div class="lbl" style="color:var(--sub)">上一个有记录的日子</div>
+        <div class="val">聊天 ${apiStat().yChat} · 生图 ${apiStat().yImg}</div></div>`:''}
+    </div>
+    <div class="hint">每发出去一个请求就 +1，包括 429 之后的自动重试、后台定时器、TA 手机里的刷新。
+      过零点清零。<b>想省次数</b>：聊天设置里关掉「模型忘了就补一次」、打开「让聊天模型直接写英文 tag」，
+      手机设置里开着「合并成一次调用」，再把「自动提取记忆」的条数调大一点。</div>
+
     <div class="grouptitle">API 配置预设</div>
     <div class="group" id="apiProfBox"></div>
     <div class="hint">把当前的地址 + Key + 模型存成一套，几个服务商之间一键切换。Key 也存在里面，只在你自己浏览器里。</div>
@@ -7671,15 +7710,33 @@ function renderChatSet(){
         <label class="switch"><input type="checkbox" ${g.povEnabled?'checked':''}
           onchange="setCfg('povEnabled',this.checked,true)"><i></i></label></div>
     </div>
+    ${g.povEnabled?`<div class="group">
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">模型忘了就补一次</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">每补一次 = 多一次 API 调用</div></div>
+        <label class="switch"><input type="checkbox" ${g.povFix?'checked':''}
+          onchange="setCfg('povFix',this.checked,true)"><i></i></label></div>
+    </div>`:''}
     <div class="hint">开启后 TA 每次回消息都会额外生成一段<b>第三人称</b>的画面——
       TA 发这几条消息时在做什么、什么表情、身边什么环境。
-      点 TA 消息旁边的<b>头像</b>就能看。每次回复会稍微多花一点 token。</div>
+      点 TA 消息旁边的<b>头像</b>就能看。<br>
+      镜头本来是<b>跟正文一起</b>回来的，<b>不额外花调用</b>。只有模型偷懒一个镜头都没给时才需要补——
+      补就是再调一次 API，所以默认关着，这轮没镜头就没镜头。</div>
 
     <div class="grouptitle">TA 发照片</div>
     <div class="group"><div class="cell static"><div class="lbl">允许 TA 在聊天里发照片</div>
       <label class="switch"><input type="checkbox" ${g.charImg!==false?'checked':''}
         onchange="setCfg('charImg',this.checked,true)"><i></i></label></div></div>
-    <div class="hint">TA 会在合适的时候拍一张发过来。提示词由聊天模型按当前动作、穿着、场景写，再拼上角色固定词、画师串和 vibe 去生图；照片里没有 TA 本人的走第二后端。生图没配好时只显示占位卡和描述。</div>
+    ${g.charImg!==false?`<div class="group">
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">让聊天模型直接写英文 tag</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">每张照片省一次 API 调用</div></div>
+        <label class="switch"><input type="checkbox" ${g.imgTagDirect?'checked':''}
+          onchange="setCfg('imgTagDirect',this.checked,true)"><i></i></label></div>
+    </div>`:''}
+    <div class="hint">TA 会在合适的时候拍一张发过来。提示词由聊天模型按当前动作、穿着、场景写，再拼上角色固定词、画师串和 vibe 去生图；照片里没有 TA 本人的走第二后端。生图没配好时只显示占位卡和描述。<br>
+      默认是<b>两步</b>：聊天模型写中文描述 → 再单独调一次把它转成英文 tag（每张照片多一次调用）。
+      打开上面那个开关就变成<b>一步</b>，聊天模型直接吐英文 tag，省掉转换那次；代价是 tag 质量全看聊天模型的英文水平。</div>
 
     <div class="grouptitle">角色主动发消息</div>
     <div class="group">
@@ -8281,7 +8338,7 @@ async function saveDiaryCfg(){
 
 const dayStr=ts=>{const d=new Date(ts);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
-async function askDiary(silent,dateStr){
+async function askDiary(silent,dateStr,pre){
   const btn=document.getElementById('diaryAsk');
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   const g=diaryCfg(c);
@@ -8311,7 +8368,8 @@ ${dstyle}
 - 两种记号，可选，每种一篇里最多用两次：写了又后悔、不想承认的话用 ~~划掉~~；语气最重的一句用 ==高亮==
 - 符合你的性格和说话习惯
 - 直接输出正文，不要标题、不要任何其他格式标记${g.extra?'\n\n## 额外要求（优先满足）\n'+g.extra:''}`;
-    const txt=(await callAPI([{role:'user',content:p}])).trim();
+    const txt=(pre!==undefined?String(pre).trim()
+      :(await callAPI([{role:'user',content:p}])).trim());
     const ex=diaries.find(d=>d.characterId===curCharId&&d.date===D&&d.who==='char');
     await dbPut('diaries',{id:ex?ex.id:uid(),characterId:curCharId,date:D,who:'char',
       content:txt,timestamp:Date.now()});
@@ -8437,7 +8495,7 @@ async function setMyMood(e,ds){
   moods=await dbAll('moods');
   moments=await dbAll('moments'); renderMood();
 }
-async function askMood(silent){
+async function askMood(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('问问 TA…');
   try{
@@ -8448,10 +8506,13 @@ async function askMood(silent){
 用一个 emoji 和一句不超过 15 字的话，表达你今天的心情。
 只能从这些 emoji 里选一个：${MOODS.join(' ')}
 只输出 JSON，不要任何解释：{"emoji":"😊","note":"……"}`;
-    let t=(await callAPI([{role:'user',content:p}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
-    const j=JSON.parse(t);
+    let j=pre;
+    if(j===undefined){
+      let t=(await callAPI([{role:'user',content:p}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      j=JSON.parse(t);
+    }
     const emoji=MOODS.includes(j.emoji)?j.emoji:'😐';
     await dbPut('moods',{id:curCharId+'_'+today()+'_char',characterId:curCharId,date:today(),
       who:'char',emoji,note:String(j.note||'').trim().slice(0,20)});
@@ -9254,7 +9315,7 @@ function renderApp(k){
 }
 
 /* 让模型生成购物车和订单 */
-async function refreshShop(silent){
+async function refreshShop(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('看看 TA 在买什么…');
   try{
@@ -9274,10 +9335,13 @@ async function refreshShop(silent){
 - cart 给 2-4 件。躺在购物车里的东西最能看出一个人——舍不得买的、给别人看的、冲动加的
 - orders 给 2-4 单，最近一个月内。日用品和真实生活痕迹要有，不要全是大件
 - 价格要符合你的消费水平，别乱标`;
-    let t=(await callAPI([{role:'user',content:p}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
-    const j=JSON.parse(t);
+    let j=pre;
+    if(j===undefined){
+      let t=(await callAPI([{role:'user',content:p}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      j=JSON.parse(t);
+    }
     const S1=x=>String(x==null?'':x).trim();
     c.phone={...(c.phone||{}),shop:{
       cart:(Array.isArray(j.cart)?j.cart:[]).filter(x=>x&&x.name).slice(0,6).map(x=>({
@@ -9316,6 +9380,106 @@ function rfUnit(k,on){
   // 有一个单位关了，「全部」就不再亮 —— 靠重渲染同步
   renderPhoneSet();
 }
+/* ---------- 总刷新合并：勾 8 项本来就是 8 次调用，拼成一个提示词只调 1 次 ----------
+   模型吐一个大 JSON，每个字段交回它原来的写入逻辑（refreshX(true, 那一段)）。
+   模型漏了哪块，那块就保持原样——**不偷偷补调用**，说 1 次就是 1 次。 */
+function rfSpecOf(k,c,me){
+  if(k==='status') return {n:'此刻状态',f:'status',t:'obj',run:v=>refreshStatus(true,v),
+    spec:`  "status": {"status":"此刻在做什么，20-45字，第一人称","battery":电量0-100,"steps":今天步数,
+    "music":{"title":"歌名","artist":"歌手","album":"专辑","dur":"3:48","progress":42,"playing":true,"playlist":[{"title":"下一首","artist":"歌手"}]},
+    "notes":[{"title":"便签标题10字内","body":"正文40字内","time":"今天 14:20"}],
+    "browser":[{"title":"网页标题20字内","site":"网站名","time":"20:14"}],
+    "schedule":[{"time":"21:30","what":"要做的事","done":false}],
+    "badges":{"notes":0,"music":0,"browser":0,"calendar":0}}`,
+    req:`此刻手机里的样子。notes 2-3 条，要像真的便签（购物清单、忘不掉的事、随手记的一句话）；browser 3-4 条，看得出你最近在关心什么，网站名用真实存在的；schedule 2-4 条，已经过去的标 done:true；playlist 2-3 首，风格和人设对得上；badges 是各 App 的未读红点数，没有写 0`};
+
+  if(k==='journal') return {n:'起居注',f:'journal',t:'obj',run:v=>refreshJournal(true,v),
+    spec:`  "journal": {"items":[{"time":"09:20","what":"做什么，15字内","tag":"分类2-4字，可留空","note":"这件事里发生的一个具体意外或小插曲，25字内；平淡的事留空"}]}`,
+    req:`你今天一整天的时间轴，7-10 条，从早排到晚。已经过去的时段要能解释对话里提过的事；还没到的时段是"接下来会发生什么"，要顺着当前剧情走。note 是关键——写"琴弦断了一根""楼下那只猫今天没来"这种具体小事，不要"很顺利"这种废话；大约一半条目有 note。上面【你今天的行程】是旧的，可以推进它，不要照抄`};
+
+  if(k==='chats') return {n:'TA 的聊天',f:'chats',t:'arr',run:v=>refreshPhChats(true,v),
+    spec:`  "chats": [{"who":"对方名字或备注","tag":"关系标签4字内，可留空","last":"最后一条内容20字内","time":"14:32 或 昨天","unread":未读数字,"msgs":[{"from":"them","text":"…"},{"from":"me","text":"…"}]}]`,
+    req:`你手机聊天软件里和**别人**的会话，3-6 条，按最近活跃排序。「${me.name}」是你正在聊天的那个人，**不要**出现在这个列表里。名字要像真的通讯录备注（"妈""老周""班主任""闲鱼买家"）；msgs 是这段对话最近 6-10 条，from 只能是 them 或 me，每条 5-40 字，last 必须和 msgs 最后一条一致；朋友少就少几个，家里关系差那条就冷淡`};
+
+  if(k==='li'){
+    const oldPosts=((c.li||{}).posts)||[];
+    const first=!oldPosts.length;
+    const keep=oldPosts.slice(0,8).map(p=>'- '+(p.private?'（已私密）':'')+String(p.text).slice(0,50)).join(NL);
+    return {n:'X',f:'li',t:'obj',run:v=>refreshLi(true,v),
+    spec:`  "li": {"handle":"账号名","bio":"简介20字内","followers":粉丝数,"following":关注数,
+    "posts":[{"text":"帖子正文10-60字","time":"2小时前","likes":数字,"replies":数字,"private":false,"imgDesc":"这条配图就写英文 danbooru tag，纯文字帖留空字符串","self":false}],
+    "hideOld":["要设成私密的旧帖开头10字"],
+    "comments":[{"who":"评论者昵称","text":"评论内容15字内","on":"评论的是哪条帖子的前10字","time":"1小时前","unread":true}],
+    "dms":[{"who":"发私信的人","last":"最后一条20字内","time":"昨天","unread":true,"msgs":[{"from":"them","text":"…"},{"from":"me","text":"…"}]}]}`,
+    req:`你的匿名社媒小号，粉丝不知道你现实里是谁。${keep?NL+'你之前发过的帖子（都还挂在主页上，不要重复、不要改写）：'+NL+keep+NL:''}${first
+      ?'posts 给 4-6 条，其中 2-3 条 private:true（以前尺度大的内容，现在设成私密，正文可以暧昧但不要露骨）；公开的那几条是画、风景、日常碎片，可以配图；comments 4-6 条来自不同的人；dms 3-4 条；hideOld 给空数组'
+      :'posts 只给上次之后**新发的** 1-3 条，素材从上面的行程和剧情里挑，time 写"3小时前""昨天"；大多公开，偶尔一条 private:true；comments 3-5 条**新收到的**，可以评在旧帖下面（on 写那条帖子的前10字）；dms 1-3 条新的，可以是老对话里那个人又发来了（who 用同一个名字），也可以是新来的人；想把哪条旧帖设私密就把开头10字写进 hideOld，不想动给空数组'}
+- 评论和私信的语气要杂——真心夸的、油腻的、催更的、阴阳怪气的都有，可以有让人不适的
+- self：图里有你本人（自拍、镜子里、露出手）才 true；画、风景、东西、猫都是 false
+- 昵称要像真实网友，不要"用户A"这种`};
+  }
+
+  if(k==='follows') return {n:'关注列表',f:'follows',t:'arr',run:v=>refreshFollows(true,v),
+    spec:`  "follows": [{"name":"昵称","handle":"英文id","bio":"简介20字内","followers":粉丝数,"following":关注数}]`,
+    req:`你这个小号关注的 5 个账号：同类博主、感兴趣的领域、偶尔关注的普通人。昵称和简介都要像真的`};
+
+  if(k==='shop') return {n:'购物',f:'shop',t:'obj',run:v=>refreshShop(true,v),
+    spec:`  "shop": {"cart":[{"name":"商品名20字内","price":价格数字,"note":"犹豫的原因或备注12字内，可留空"}],
+    "orders":[{"name":"商品名20字内","status":"待发货/运输中/已签收/退款中","time":"3天前"}]}`,
+    req:`你购物软件里的样子。cart 2-4 件——躺在购物车里的东西最能看出一个人（舍不得买的、给别人看的、冲动加的）；orders 2-4 单，最近一个月内，日用品和真实生活痕迹要有，不要全是大件；价格符合你的消费水平`};
+
+  if(k==='diary'){
+    const g=diaryCfg(c);
+    const dstyle=String(g.style||'').trim();
+    return {n:'日记',f:'diary',t:'str',run:v=>askDiary(true,null,v),
+    spec:`  "diary": "今天的日记正文，第一人称，一整段"`,
+    req:`${dstyle?'先看你以前写的日记，**模仿它的语气、句长、断行习惯和记号用法**，不要照抄内容：'+NL+dstyle.slice(0,600)+NLNL:''}第一行自己写日期和天气，像「2026年5月1日 星期五，天气：大概晴吧。没出门。」；${g.minLen}-${g.maxLen} 字，写今天剧情里真实发生的事和没说出口的心思，像真的写在本子上，不是汇报；写了又后悔的话用 ~~划掉~~，语气最重的一句用 ==高亮==，每种最多两次；不要照抄上面【你最近的日记】${g.extra?NL+'额外要求（优先满足）：'+g.extra:''}`};
+  }
+
+  if(k==='mood') return {n:'心情',f:'mood',t:'obj',run:v=>askMood(true,v),
+    spec:`  "mood": {"emoji":"😊","note":"不超过15字"}`,
+    req:`你今天的心情。emoji **只能**从这些里选一个：${MOODS.join(' ')}`};
+
+  return null;
+}
+
+async function refreshAllOnce(jobs){
+  const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
+  const specs=jobs.map(d=>rfSpecOf(d.k,c,me)).filter(Boolean);
+  if(!specs.length) return {ok:[],miss:[]};
+  const ms=(await msgsOf(curCharId)).slice(-14);
+  const p=storyCtx(c,{msgs:ms,take:16})+NLNL+`现在一次性生成你手机里的这 ${specs.length} 块内容。
+
+**只输出一个 JSON 对象**，下面这些字段一个都不能少：
+
+{
+${specs.map(x=>x.spec).join(','+NL)}
+}
+
+每块的要求：
+
+${specs.map(x=>'## '+x.n+NL+x.req).join(NLNL)}
+
+- 每块之间要对得上：日记里提到的事，起居注、X、购物车里都该找得到影子；心情要和这一天的内容一致
+- 全部要符合你的身份、当前时间和刚才的对话，具体、生活化，不要抒情，不要模板话
+- 只输出这一个 JSON 对象，不要任何解释，不要 markdown 代码块`;
+  let t=(await callAPI([{role:'user',content:p}])).trim()
+    .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+  const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+  const j=JSON.parse(t);
+  const ok=[], miss=[];
+  for(const x of specs){
+    const v=j[x.f];
+    const good=x.t==='arr'?(Array.isArray(v)&&v.length>0)
+      :x.t==='str'?(typeof v==='string'&&!!v.trim())
+      :(!!v&&typeof v==='object'&&!Array.isArray(v));
+    if(!good){ miss.push(x.n); continue; }
+    try{ if(await x.run(v)) ok.push(x.n); else miss.push(x.n); }
+    catch(e){ console.warn('合并刷新写入失败',x.f,e); miss.push(x.n); }
+  }
+  return {ok,miss};
+}
+
 let rfBusy=false;
 async function refreshAll(){
   if(rfBusy) return toast('还在刷，等一下');
@@ -9324,6 +9488,18 @@ async function refreshAll(){
   const jobs=RF_DEFS.filter(d=>rf[d.k]);
   if(!jobs.length) return toast('总刷新范围是空的，去手机设置里勾几项');
   if(jobs.length===1) return jobs[0].k==='status'?refreshStatus():jobs[0].fn().then(()=>{renderPhone();toast('刷新好了');});
+  if(S.rfMerge!==false){
+    rfBusy=true;
+    toast(`一次调用刷 ${jobs.length} 项…`);
+    let r=null, err='';
+    try{ r=await refreshAllOnce(jobs); }catch(e){ err=String(e&&e.message||e); }
+    rfBusy=false;
+    show('s-phone'); renderPhone();
+    if(!r){ lastFail='合并刷新失败：'+err; return toast('合并刷新失败：'+err.split(NL)[0].slice(0,50)); }
+    return toast(r.miss.length
+      ?`${r.ok.length}/${jobs.length} 项到手，${r.miss.join('、')} 模型没给`
+      :`刷新完了，${r.ok.length} 项只花了 1 次调用`);
+  }
   rfBusy=true;
   let ok=0;
   for(let i=0;i<jobs.length;i++){
@@ -9336,7 +9512,7 @@ async function refreshAll(){
 }
 
 /* 刷新 = 让模型按当前状态生成一整块手机内容 */
-async function refreshJournal(silent){
+async function refreshJournal(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('生成今天的起居注…');
   try{
@@ -9366,10 +9542,13 @@ async function refreshJournal(silent){
   "琴弦断了一根，用备用的顶上"、"楼下那只猫今天没来"、"外卖送错了但懒得退"
 - 大约一半的条目有 note，其余留空。平淡的事就是平淡的
 - 要符合你的生活状态和作息，不要编出你不会做的事`;
-    let t=(await callAPI([{role:'user',content:p}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
-    const j=JSON.parse(t);
+    let j=pre;
+    if(j===undefined){
+      let t=(await callAPI([{role:'user',content:p}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      j=JSON.parse(t);
+    }
     const S1=x=>String(x==null?'':x).trim();
     const items=(Array.isArray(j.items)?j.items:[...(j.done||[]),...(j.plan||[])])
       .filter(x=>x&&x.what).slice(0,12).map(x=>({
@@ -9383,7 +9562,7 @@ async function refreshJournal(silent){
   }catch(e){ if(!silent) toast('失败：'+e.message); return false; }
 }
 
-async function refreshStatus(silent){
+async function refreshStatus(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('正在拿 TA 的手机…');
   try{
@@ -9413,10 +9592,13 @@ async function refreshStatus(silent){
 - schedule 给 2-4 条，已经过去的标 done:true
 - playlist 给 2-3 首，风格要和你的人设对得上
 - badges 是各 App 的未读红点数，没有就写 0`;
-    let t=(await callAPI([{role:'user',content:prompt}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
-    const j=JSON.parse(t);
+    let j=pre;
+    if(j===undefined){
+      let t=(await callAPI([{role:'user',content:prompt}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      j=JSON.parse(t);
+    }
     c.phone={
       status:String(j.status||'').trim().slice(0,80),
       battery:Number.isFinite(+j.battery)?Math.round(+j.battery):null,
@@ -10956,6 +11138,7 @@ async function generateImageRaw(scene,char,opt){
   if(opt.noVibe) g={...g,vibeOn:false};
   const ep=imgEndpoint(g);
   if(!ep.base) throw new Error(useSecond?'第二后端地址没填':(g.backend==='chat'?'聊天接口地址也没填':'还没配生图地址'));
+  noteApiCall('img');
   // 第二后端只发画面描述：画师串 / 质量词 / 负向都是给 NAI 那类模型准备的
   const prompt=g._plain?String(scene||'').trim():buildImgPrompt(scene,char);
   const negative=g._plain?'':buildImgNegative(char);
@@ -12277,7 +12460,7 @@ function renderPhChat(){
     <div style="height:10px"></div>`;
   const b=document.getElementById('phChatBody'); b.scrollTop=b.scrollHeight;
 }
-async function refreshPhChats(silent){
+async function refreshPhChats(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('看看 TA 在和谁聊…');
   try{
@@ -12302,10 +12485,13 @@ msgs 是这段对话最近的 6-10 条消息（从早到晚，from 只能是 the
 - 名字要像真的通讯录备注（"妈"、"老周"、"班主任"、"闲鱼买家"…）
 - last 要能一眼看出这段关系的温度
 - 不要出现 ${me.name}`;
-    let t=(await callAPI([{role:'user',content:p}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
-    const arr=JSON.parse(t);
+    let arr=pre;
+    if(arr===undefined){
+      let t=(await callAPI([{role:'user',content:p}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
+      arr=JSON.parse(t);
+    }
     const S1=x=>String(x==null?'':x).trim();
     const old={};
     for(const x of ((c.phone&&c.phone.chats)||[])) if((x.msgs||[]).length) old[x.who]=x.msgs;
@@ -12552,7 +12738,7 @@ function liMenu(){
     {ic:'refresh',t:'刷新账号',fn:()=>refreshLi()}
   ]);
 }
-async function refreshFollows(silent){
+async function refreshFollows(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('生成关注列表…');
   try{
@@ -12563,10 +12749,13 @@ async function refreshFollows(silent){
 
 只输出 JSON 数组：
 [{"name":"昵称","handle":"英文id","bio":"简介20字内","followers":粉丝数,"following":关注数}]`;
-    let t=(await callAPI([{role:'user',content:q}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
-    const arr=JSON.parse(t);
+    let arr=pre;
+    if(arr===undefined){
+      let t=(await callAPI([{role:'user',content:q}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
+      arr=JSON.parse(t);
+    }
     const S1=x=>String(x==null?'':x).trim();
     const list=arr.filter(x=>x&&x.name).slice(0,6).map(x=>({
       name:S1(x.name).slice(0,16),handle:S1(x.handle).slice(0,20)||'user',
@@ -12585,7 +12774,7 @@ async function refreshFollows(silent){
 
 /* 刷新 X：第一次生成整份快照；之后每次只生成「这段时间新发生的」，叠在旧内容上面。
    旧帖、旧评论、旧私信全部保留（图、评论、私密状态都在），不会被刷掉。 */
-async function refreshLi(silent){
+async function refreshLi(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('正在刷新 X…');
   try{
@@ -12644,10 +12833,13 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
 - 评论和私信的语气要杂——有真心夸的、有油腻的、有催更的、有阴阳怪气的，可以有让人不适的
 - self：这条的图里有你本人（自拍、镜子里、露出手）才 true；画、风景、东西、猫都是 false
 - 昵称要像真实网友，不要"用户A"这种`;
-    let t=(await callAPI([{role:'user',content:p}])).trim()
-      .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
-    const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
-    const j=JSON.parse(t);
+    let j=pre;
+    if(j===undefined){
+      let t=(await callAPI([{role:'user',content:p}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      j=JSON.parse(t);
+    }
     const S1=x=>String(x==null?'':x).trim();
     const num=x=>Math.max(0,Math.round(+x)||0);
     const now=Date.now();
@@ -12718,7 +12910,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
       }
     }
     // 新发的那条顺手把评论拉起来，老帖子留着点进去再拉
-    if(fresh.length && !(c.li.posts[0].comments||[]).length){
+    if(pre===undefined && fresh.length && !(c.li.posts[0].comments||[]).length){
       liPostIdx=0;
       await loadPostComments(true);
       if(!silent){ show('s-li'); renderLi(); } else renderLi();
@@ -12840,6 +13032,13 @@ function renderPhoneSet(){
 
     <div class="grouptitle">总刷新范围</div>
     <div class="group">
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">合并成一次调用<span style="color:var(--sub);font-weight:400">（全局）</span></div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">勾几项都只调 1 次 API</div></div>
+        <label class="switch"><input type="checkbox" ${S.rfMerge!==false?'checked':''}
+          onchange="S.rfMerge=this.checked;dbPut('settings',S);renderPhoneSet()"><i></i></label></div>
+    </div>
+    <div class="group">
       <div class="cell static"><div class="lbl" style="font-weight:600">全部</div>
         <label class="switch"><input type="checkbox" ${rfAllOn(draftPhone.rf)?'checked':''}
           onchange="rfMaster(this.checked)"><i></i></label></div>
@@ -12851,9 +13050,12 @@ function renderPhoneSet(){
         <label class="switch"><input type="checkbox" ${draftPhone.rf[d.k]?'checked':''}
           onchange="rfUnit('${d.k}',this.checked)"><i></i></label></div>`).join('')}
     </div>
-    <div class="hint">主屏 dock 上那个刷新键，按这里勾的顺序一项一项刷。
+    <div class="hint">主屏 dock 上那个刷新键，刷这里勾的几项。
       任何一个单项关掉，「全部」会自动跟着灭；重新打开「全部」就整组全开。
-      勾得越多越慢、也越费额度。单独进某个 App 点它自己的刷新键不受这里影响。</div>
+      单独进某个 App 点它自己的刷新键不受这里影响。<br>
+      <b>合并开着</b>：勾中的几块拼成一个提示词，模型一次吐回来，<b>总共 1 次调用</b>。
+      模型漏了哪块，那块就保持原样，不会偷偷补调用。块数越多单块越容易缩水，觉得质量掉了就关掉合并。<br>
+      <b>合并关掉</b>：按老规矩一项一项刷，勾几项就是几次调用。</div>
 
     <div class="grouptitle">起居注</div>
     <div class="group">
@@ -13223,7 +13425,22 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 - 用在想引起注意、撒娇、无语、催回复的时候；对方拍了你，你也可以拍回去
 - **不能只拍不说话**，数组里还要有正常消息
 - 低频，一轮最多一次`;
-  if(chatCfg(char).charImg!==false) p+=`
+  if(chatCfg(char).charImg!==false) p+=(chatCfg(char).imgTagDirect?`
+
+# **发照片**
+你可以拍一张照片发给对方，格式：\`{"type":"image","caption":"中文一句话，这是什么照片","tags":"英文 danbooru tag，逗号分隔","self":true}\`
+- tags **直接写英文 tag**，不要写中文描述。按这个顺序：
+  1. 主体：照片里有你就按性别写 1boy / 1girl，只有你自己再加 solo；没有人就不写
+  2. 背景 / 场景 / 光线 / 氛围（在哪、几点、什么天气、什么光）
+  3. 你在做什么：姿势、动作、表情、视线、手在干什么、镜头构图（selfie / mirror selfie / from above / close-up…）
+  4. 穿着：每件衣服、颜色、材质、配饰、状态
+- ${char.imgPrompt?'你的**外貌固定 tag 已经由程序另外拼上**，主体之外一个外貌词都不要写：发型发色瞳色身材全都不要':'你没填固定外貌词，所以发型、发色、瞳色、体型也要写上'}
+- 数量不限，画面复杂就多写；不要画师名、不要质量词、不要句子
+- self：照片里有你本人（自拍、镜子里、露出手）填 true；拍的是风景、饭、猫、东西填 false
+- **必须是严格 JSON 对象**：双引号、冒号，不要写成 tags='…' 或 self=true；这个对象不是台词，**绝不能把 tags 当文字发出来**
+- 用在对方要看、剧情里你正在拍东西、或你真想分享的时候；平常聊天不要发
+- **发照片不能代替说话**，数组里还要有正常消息
+- 一轮最多一张`:`
 
 # **发照片**
 你可以拍一张照片发给对方，格式：\`{"type":"image","caption":"中文一句话，这是什么照片","desc":"用中文两三句详细描述这张照片：画面里有什么、你此刻的动作表情和穿着、在哪、光线氛围怎样","self":true}\`
@@ -13232,7 +13449,7 @@ ${stickers.map(x=>'- '+x.name).join('\n')}
 - **必须是严格 JSON 对象**：双引号、冒号，不要写成 tags='…' 或 self=true；这个对象不是台词，**绝不能把 tags 当文字发出来**
 - 用在对方要看、剧情里你正在拍东西、或你真想分享的时候；平常聊天不要发
 - **发照片不能代替说话**，数组里还要有正常消息
-- 一轮最多一张`;
+- 一轮最多一张`);
   const _liPub=(((char.li||{}).posts)||[]).filter(x=>!x.private);
   if(_liPub.length) p+=`
 
@@ -13734,6 +13951,22 @@ function parseReplyRaw(text){
    的**起跑时间**至少隔开 API_MIN_GAP，把并发削成排队。 */
 const API_MIN_GAP=900;
 let _apiLast=0, _apiChain=Promise.resolve();
+/* ---------- 调用计数 ----------
+   按次计费的 API 上，"今天到底调了多少次"是唯一能验证省没省的数字。
+   聊天和生图各记一笔，跨天自动清零，只存在本地设置里。 */
+function apiStat(){
+  const d=today();
+  let a=S.apiStat;
+  if(!a||a.d!==d) a=S.apiStat={d,chat:0,img:0,yChat:(a&&a.chat)||0,yImg:(a&&a.img)||0};
+  return a;
+}
+let _statSave=null;
+function noteApiCall(kind){
+  const a=apiStat();
+  if(kind==='img') a.img++; else a.chat++;
+  clearTimeout(_statSave);
+  _statSave=setTimeout(()=>dbPut('settings',S),4000);
+}
 function apiSlot(){
   _apiChain=_apiChain.then(async()=>{
     const wait=API_MIN_GAP-(Date.now()-_apiLast);
@@ -13747,6 +13980,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function callAPI(messages,_try){
   if(!S.apiKey) throw new Error('还没填 API Key');
   if(!S.apiBase) throw new Error('还没填 API 地址');
+  noteApiCall('chat');   // 重试也是一次真请求，照记
   await apiSlot();
   const r=await fetch(S.apiBase.replace(/\/+$/,'')+'/chat/completions',{
     method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.apiKey},
@@ -13915,8 +14149,8 @@ ${regenNote}
     if(!parts.length&&reacts.length) throw new Error('只贴了表情没说话');
     if(!parts.length) throw new Error('没解析出内容');
     for(const r of reacts) await aiReact(r);
-    // 说好每次都带，模型漏了就单独补一次
-    if(!povPart&&chatCfg(char).povEnabled){
+    // 模型漏了镜头要不要单独补一次 —— 补一次 = 多一次 API，默认不补
+    if(!povPart&&chatCfg(char).povEnabled&&chatCfg(char).povFix){
       try{
         const said=parts.map(p=>p.content).filter(Boolean).join(' / ');
         // 带上最近对话和上一个镜头 —— 以前只给 bio，补拍出来的画面和剧情对不上
