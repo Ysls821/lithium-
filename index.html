@@ -3615,10 +3615,29 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 实测：三个不同来源各调一次，记录里正确认出「聊天回复」「照片描述转英文 tag」「滚动摘要」。
 
+### 2026-09-08（二）· 找到额度真正的去处：后台任务失败后每分钟重试
+
+用户：「我甚至没点任何东西，只是把它放后台，再看额度又用了 4 条。」
+
+零操作还在扣，只可能是定时器。把六个 tick 全翻出来看，**每一个都有同一个缺陷**：它们靠「状态有没有往前推」来决定要不要干活，而失败时状态不推进，于是下一个 tick 又原样跑一遍。
+
+最凶的是主动开口。`proactiveTick` 67 秒一轮，条件是「安静够久 + 今天没超配额」。`proactiveSend` 里 `if(!parts.length) return;` —— 模型返回的东西解析不出可发内容时，直接 return，**`c.proLog` 不更新**；`ms` 也没有新消息，所以「安静够久」永远成立，配额计数也永远不涨。结果就是**每 67 秒一次 API，无声无息，直到关页面**。四分半钟正好 4 次，和用户看到的数字对得上。
+
+同样的毛病：`memAutoTick` / `sumAutoTick` 在 `runExtract` / `runSummary` 返回 -1 时不推进轮数锚点（97 秒、151 秒一轮）；`journalAutoTick` 失败时 `journal.at` 不更新（10 分钟一轮）；`journalTick` 和 `xDmTick` 失败时状态同样不动，只是有骰子挡着，慢一点而已。
+
+**改法**：加一层失败退避。`bgCool(c,key)` / `bgFail(c,key,err)` / `bgOk(c,key)` 三个函数，失败写进 `c.bgFail[key]`，退避 10 分钟起，连续失败翻倍，封顶 2 小时，成功一次就清零。六个 tick 全部接上，各自用自己的 key（pro / mem / sum / journal / share / xdm）。顺带把 `proactiveSend` 和 `xDmSend` 改成有明确返回值，不然分不清「成功了」还是「悄悄 return 了」。
+
+**还要看得见**：设置 → 接口与 API 里，凡是正在退避的任务都列出来——哪个角色、哪个任务、失败几次、原因是什么、暂停到几点。闷声重试是这次的根本问题，光修不显示等于下次换个地方再犯。
+
+模拟验证：让主动开口一直失败，45 分钟内新逻辑调 3 次（第 0、10、30 分钟），旧逻辑约 40 次。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **后台任务的「要不要干活」判据，绝不能只看业务状态** → 六个 tick 全部踩同一个坑：失败 → 状态不推进 → 下一轮条件依然成立 → 无限重试。凡是定时触发的活，除了业务状态还必须记一个「上次尝试过了」，否则失败就是死循环烧钱。
+- **`if(!x) return;` 是这类死循环最常见的入口** → 早退时把该更新的计数、时间戳、日志全跳过了，看起来只是"这次没做"，实际是"下次还会再来"。写早退前先问：这条路径上有没有本该推进的状态？
+- **静默失败要有露头的地方** → 用户能发现是因为看了服务商后台。应用自己一个字都没说。后台任务的失败状态必须在界面上有一处能看到，否则修好一个还会有下一个。
 - **用户问「为什么是 4 次」时，别去猜是哪 4 次** → 代码能证明主路径只有 1 次，但凑成 4 的组合有五六种（重试、生图走聊天接口、后台到点、多标签页各跑一套定时器、手动重新生成）。与其列可能性让用户自己排查，不如花十分钟加一份来源记录，让下一次直接可见。
 - **调用栈就是免费的埋点** → `new Error().stack` 在入口处一挖，30 多个调用点零改动全覆盖。想给每个调用点手动传 tag 才是又累又容易漏的做法。
 - **别把刚换好的单位又折算回去** → 轮数改完，喂数据时写了 `Math.min(120, takeTurns(...).length)`，一个封顶就把「5 轮」在长回复角色身上变回「2-3 轮」，而且完全静默。换单位要一路换到底：判定按轮、取数也按轮。
@@ -6500,9 +6519,12 @@ async function sumAutoTick(){
       c.sumAtT=turns; await dbPut('characters',c); characters=await dbAll('characters'); continue;
     }
     if(turns-c.sumAtT<every) continue;
+    if(bgCool(c,'sum')) continue;
     sumBusy=true;
-    const n=await runSummary(c.id,{turns:turns-c.sumAtT});
-    if(n>=0){ c.sumAt=ms.length; c.sumAtT=turns; await dbPut('characters',c); characters=await dbAll('characters'); }
+    let n=-1;
+    try{ n=await runSummary(c.id,{turns:turns-c.sumAtT}); }catch(e){ n=-1; }
+    if(n>=0){ c.sumAt=ms.length; c.sumAtT=turns; await dbPut('characters',c); characters=await dbAll('characters'); await bgOk(c,'sum'); }
+    else await bgFail(c,'sum','总结失败，模型没返回能用的结果');
     sumBusy=false;
     break;
   }
@@ -6549,6 +6571,37 @@ function mountedMemText(char){
 /* ---------- 记忆自动提取 ----------
    EVE 的"它记得我"就靠这个：聊够一定轮数就在后台把这段对话嚼成记忆，
    下次对话由 memoryText() 自动注回提示词。用户不用管。 */
+/* ---------- 后台任务的失败退避 ----------
+   后台每个 tick 都靠「状态有没有往前推」来决定要不要干活。失败时状态不推进，
+   下一个 tick 就又跑一遍 —— 主动开口是 67 秒一轮，等于每 67 秒烧一次额度，
+   而且用户什么都没点、什么都看不见。所以失败必须记冷却：
+   10 分钟起，连续失败翻倍，封顶 2 小时；成功一次就清零。 */
+const BG_NAMES={pro:'主动开口',mem:'提取记忆',sum:'滚动摘要',
+  journal:'起居注自动更新',share:'主动讲今天的事',xdm:'X 小号主动私信'};
+const bgCool=(c,k)=>{ const b=(c.bgFail||{})[k]; return !!(b&&Date.now()<b.until); };
+async function bgFail(c,k,err){
+  const f={...(c.bgFail||{})}, prev=f[k]||{n:0};
+  const n=Math.min((prev.n||0)+1,5);
+  f[k]={n,until:Date.now()+Math.min(7200e3,600e3*Math.pow(2,n-1)),
+    msg:String((err&&err.message)||err||'没成功').slice(0,120),at:Date.now()};
+  c.bgFail=f;
+  await dbPut('characters',c); characters=await dbAll('characters');
+  console.warn('后台任务失败，退避到',new Date(f[k].until).toLocaleTimeString(),k,f[k].msg);
+}
+async function bgOk(c,k){
+  if(!c.bgFail||!c.bgFail[k]) return;
+  const f={...c.bgFail}; delete f[k]; c.bgFail=f;
+  await dbPut('characters',c); characters=await dbAll('characters');
+}
+/* 现在有哪些后台任务卡在失败退避里 —— 设置页要显示，别让它闷声烧额度 */
+function bgFailList(){
+  const out=[];
+  for(const c of characters) for(const k of Object.keys(c.bgFail||{})){
+    const v=c.bgFail[k];
+    if(v&&Date.now()<v.until) out.push({who:c.name,job:BG_NAMES[k]||k,msg:v.msg,n:v.n,until:v.until});
+  }
+  return out;
+}
 /* 提取 / 总结的间隔，单位都是轮。角色级优先，填 0 跟随全局 */
 const memEveryOf=c=>Math.max(2,+chatCfg(c).memEvery||+S.memEvery||12);
 const sumEveryOf=c=>Math.max(3,+chatCfg(c).sumEvery||30);
@@ -6566,13 +6619,17 @@ async function memAutoTick(){
       c.memAtT=turns; await dbPut('characters',c); characters=await dbAll('characters'); continue;
     }
     if(turns-c.memAtT<every) continue;        // 又攒够一批轮次才提
+    if(bgCool(c,'mem')) continue;             // 刚失败过，退避中
     memAutoBusy=true;
     // 上次之后新增了几轮就往前数几轮，一轮连发多少条都原样带上
-    const n=await runExtract(c.id,{turns:turns-c.memAtT});
+    let n=-1;
+    try{ n=await runExtract(c.id,{turns:turns-c.memAtT}); }catch(e){ n=-1; }
+    if(n<0) await bgFail(c,'mem','提取失败，模型没返回能用的结果');
     if(n>=0){
       c.memAt=ms.length; c.memAtT=turns;
       await dbPut('characters',c);
       characters=await dbAll('characters');
+      await bgOk(c,'mem');
       // 只有正在看这个角色时才提示，后台默默记就行，别打断你在别处干的事
       if(n&&curCharId===c.id&&document.getElementById('s-chat').classList.contains('active'))
         toast(`记住了 ${n} 件事`);
@@ -6608,6 +6665,14 @@ function renderSettings(){
       <div class="cell" onclick="openApiLog()"><div class="lbl">看看每一次是谁调的</div>
         <div class="val">${(apiStat().log||[]).length} 条记录</div>${CHEV}</div>
     </div>
+    ${bgFailList().length?`<div class="group">${bgFailList().map(x=>`
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl" style="color:var(--danger)">${esc(x.who)}　${esc(x.job)}　失败 ${x.n} 次</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">
+          ${esc(x.msg)}　暂停到 ${fmtTime(x.until)}</div></div></div>`).join('')}
+    </div>
+    <div class="hint">这些后台任务失败了，已经<b>自动暂停</b>，不会再每分钟重试烧额度。
+      到点会再试一次；一直失败就去把对应的开关关掉。</div>`:''}
     <div class="hint">每发出去一个请求就 +1，包括 429 之后的自动重试、后台定时器、TA 手机里的刷新。
       过零点清零。<b>想省次数</b>：聊天设置里关掉「模型忘了就补一次」、打开「让聊天模型直接写英文 tag」，
       手机设置里开着「合并成一次调用」，再把「自动提取记忆」的条数调大一点。</div>
@@ -8081,7 +8146,12 @@ async function proactiveTick(){
     if(!ms.length) continue;
     const last=ms[ms.length-1];
     if(Date.now()-last.timestamp < g.proMinutes*60000) continue;
-    try{ await proactiveSend(c,ms,g); }catch(e){ console.warn('主动消息失败',e); }
+    if(bgCool(c,'pro')) continue;          // 刚失败过，退避中
+    let ok=false;
+    try{ ok=await proactiveSend(c,ms,g); }
+    catch(e){ await bgFail(c,'pro',e); break; }
+    if(ok) await bgOk(c,'pro');
+    else await bgFail(c,'pro','模型没给出能发的内容');
     break; // 一轮只处理一个，避免同时打一堆请求
   }
 }
@@ -8101,7 +8171,7 @@ async function proactiveSend(c,ms,g){
   let parts=parseReply(await callAPI(payload));
   const _pv=parts.find(p=>p.type==='pov');
   parts=parts.filter(p=>p.type!=='pov'&&p.type!=='recall'&&p.type!=='transfer_action');
-  if(!parts.length) return;
+  if(!parts.length) return false;
   for(const p of parts){
     const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(p),timestamp:Date.now()};
     if(_pv) row.meta={...row.meta,pov:String(_pv.content||'').slice(0,300)};
@@ -8116,6 +8186,7 @@ async function proactiveSend(c,ms,g){
   pushNotify(c,parts.map(x=>x.content||x).join(' ').slice(0,120),true);
   if(curCharId===c.id) await renderChat();
   else if(document.getElementById('s-chats').classList.contains('active')) renderChatList();
+  return true;
 }
 
 /* ============================================================
@@ -12382,9 +12453,12 @@ async function journalTick(){
     // 至少安静 20 分钟才考虑，避免打断正在进行的对话
     if(Date.now()-ms[ms.length-1].timestamp<20*60000) continue;
     if(Math.random()*100>(g.journalRate||20)) continue;
+    if(bgCool(c,'share')) continue;
     const keep=curCharId; curCharId=c.id;
-    await shareJournal(true);
+    let ok=false;
+    try{ ok=await shareJournal(true); }catch(e){ ok=false; }
     curCharId=keep;
+    if(ok) await bgOk(c,'share'); else await bgFail(c,'share','没讲成，模型没给出能发的内容');
     break;
   }
 }
@@ -12405,8 +12479,11 @@ async function xDmTick(){
     if(!ms.length) continue;
     if(Date.now()-ms[ms.length-1].timestamp<30*60000) continue;   // 正聊着就别插一脚
     if(Math.random()*100>(g.xdmRate||15)) continue;
+    if(bgCool(c,'xdm')) continue;
     xDmBusy=true;
-    try{ await xDmSend(c); }catch(e){}
+    let ok=false;
+    try{ ok=await xDmSend(c); }catch(e){ ok=false; }
+    if(ok) await bgOk(c,'xdm'); else await bgFail(c,'xdm','私信没发出来');
     xDmBusy=false;
     break;
   }
@@ -12430,13 +12507,14 @@ ${hist?`\nX 私信记录：\n${hist}`:''}
 - 10-50 字，像真的私信，不要客套开场白
 只输出私信文本，不要解释、不要引号。`;
   const t=(await callAPI([{role:'user',content:q}])).trim().slice(0,140);
-  if(!t) return;
+  if(!t) return false;
   c.xdm=[...(c.xdm||[]),{from:'them',text:t,at:Date.now(),unread:true}];
   xLogAdd(c,'xdmPush',{reply:t.slice(0,60)});
   await dbPut('characters',c); characters=await dbAll('characters');
   pushNotify(c,'X 私信：'+t.slice(0,40),true);
   if(document.getElementById('s-xDm').classList.contains('active')&&xDmCid===c.id) renderXDm();
   else if(document.getElementById('s-x').classList.contains('active')) renderX();
+  return true;
 }
 
 /* 每天自动生成起居注：过了设定的钟点、当天还没生成过就补一次。
@@ -12460,15 +12538,17 @@ async function journalAutoTick(){
     if(!due) continue;
     const ms=await msgsOf(c.id);
     if(!ms.length) continue;          // 没聊过就没素材，别硬编
+    if(bgCool(c,'journal')) continue;
     jAutoBusy=true;
     const keep=curCharId; curCharId=c.id;
     try{
       if(await refreshJournal(true)){
+        await bgOk(c,'journal');
         // 刚更新完，按概率让 TA 主动把其中一件事讲给你听
         const push=Math.max(0,Math.min(100,+pc.jPush||0));
         if(push&&Math.random()*100<push) await shareJournal(true);
-      }
-    }catch(e){}
+      } else await bgFail(c,'journal','起居注没生成出来');
+    }catch(e){ await bgFail(c,'journal',e); }
     curCharId=keep;
     jAutoBusy=false;
     break;
