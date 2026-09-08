@@ -3589,7 +3589,13 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 用户猜的「两轮就总结一次」基本准确，记忆那个更夸张——按次计费的 API 上，等于每聊一句话就多一次调用。
 
-**改法**：新增 `countTurns(ms)`，和 `takeTurns` 同一套定义（role 每变一次算一段，两段算一轮）。`memAutoTick` / `sumAutoTick` 改成比轮数，喂给 `runExtract` / `runSummary` 的消息也从「差值条数」换成 `takeTurns(ms, 差值轮数+1)`，上限放宽到 120 条——调用次数少了，单次多带点上下文反而更值。
+**改法**：新增 `countTurns(ms)`，和 `takeTurns` 同一套定义（role 每变一次算一段，两段算一轮）。`memAutoTick` / `sumAutoTick` 改成比轮数。
+
+第一版还留了个尾巴：喂给 `runExtract` / `runSummary` 的消息写成 `Math.min(120, takeTurns(...).length)`，等于把轮数又折算回条数、还封了顶。用户当场抓住——「我选了 5 轮，其实你拉的只有前 50 条，而这 50 条可能有一轮就占 20 条，实际只有 2-3 轮」。她说得对：**一轮连发 3 条还是 30 条都必须算一轮**，封顶会让设定的轮数在长回复的角色身上悄悄缩水。
+
+所以 `runExtract` / `runSummary` 的第二个参数改成可以收 `{turns:n}`，内部直接 `takeTurns(all, n)` 往前数，数出来多少条就是多少条，**不折算、不封顶**；给数字仍是老用法（最近 N 条）。实测一段每轮 2/20/3/30/5/9 条的对话：要 3 轮拿回 47 条，要 5 轮拿回 72 条，每次都从 user 那条起头，轮是完整的。
+
+顺带把间隔取值收成 `memEveryOf(c)` / `sumEveryOf(c)`，后台和手动按钮共用同一套优先级——原来手动按钮写死「最近 40 条」，和自动那边一个按条一个按轮，正是这次踩的同一类坑。
 
 **单位迁移**：老的 `c.memAt` / `c.sumAt` 存的是条数，直接拿来和轮数相减会变成大负数、导致永远不触发。所以另开 `c.memAtT` / `c.sumAtT`，第一次见到是 `undefined` 就按当前轮数落个锚然后跳过这一轮，从此刻往后算。手动总结和 EVE 导入也跟着把锚点推上去，免得刚做完又自动做一次。
 
@@ -3599,6 +3605,7 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 ## 修过的坑（本次新增）
 
+- **别把刚换好的单位又折算回去** → 轮数改完，喂数据时写了 `Math.min(120, takeTurns(...).length)`，一个封顶就把「5 轮」在长回复角色身上变回「2-3 轮」，而且完全静默。换单位要一路换到底：判定按轮、取数也按轮。
 - **计数单位要跟着「一次交互」走，不是跟着数据行走** → 一轮连发 8-10 条气泡时，「每 N 条」这个阈值实际被放大了近 10 倍。凡是「每 N 个就做一次后台工作」的逻辑，先问 N 的单位和用户心里那个单位是不是同一个。
 - **换计数单位必须换存储字段** → 老字段存的是旧单位，直接复用会得到"永远不触发"或"每次都触发"，而且完全静默。开新字段 + 首次落锚，比原地转换安全。
 - **界面上的数字要能自证** → 用户会怀疑"到底是我调的生效还是代码写死的"。凡是提示词/后台逻辑读设置的地方，说明文字里就该写清优先级（角色级 → 全局 → 默认值）。
@@ -4655,7 +4662,7 @@ function renderSums(){
 }
 async function makeSumNow(){
   toast('总结中…');
-  const n=await runSummary(curCharId,40);
+  const n=await runSummary(curCharId,{turns:sumEveryOf(characters.find(x=>x.id===curCharId))});
   if(n>0){
     const c=characters.find(x=>x.id===curCharId);
     const ms=await msgsOf(curCharId);
@@ -6349,7 +6356,7 @@ async function extractMemories(){
   const ms=(await msgsOf(memCharId)).slice(-40);
   if(ms.length<2) return toast('对话太少，先聊几轮');
   if(btn){ btn.textContent='提取中…'; btn.disabled=true; }
-  const n=await runExtract(memCharId,40);
+  const n=await runExtract(memCharId,{turns:memEveryOf(characters.find(x=>x.id===memCharId))});
   memories=await dbAll('memories');
   renderMemory();
   if(btn){ btn.textContent='从对话中提取'; btn.disabled=false; }
@@ -6358,11 +6365,15 @@ async function extractMemories(){
 
 /* 核心：给定角色，从最近 N 条对话里抽记忆存库。返回新增条数，失败返回 -1。
    手动按钮和后台自动提取共用这一份 */
+/* take 可以是 {turns:n} —— 从最后一条往前数 n 轮，数出来多少条就是多少条，
+   **不折算成固定条数、也不封顶**。一轮连发 3 条还是 30 条都按一轮算。
+   给个数字则是老用法：取最近 N 条。 */
 async function runExtract(cid,take){
   const c=characters.find(x=>x.id===cid);
   if(!c) return -1;
   const me=personaOf(c);
-  const ms=(await msgsOf(cid)).slice(-(take||40));
+  const all=await msgsOf(cid);
+  const ms=(take&&take.turns)?takeTurns(all,Math.max(1,take.turns)):all.slice(-(+take||40));
   if(ms.length<2) return 0;
   const memCharId=cid;   // 下面的模板沿用这个名字
   try{
@@ -6423,11 +6434,12 @@ ${convo}
    ============================================================ */
 const sumsOf=cid=>summaries.filter(x=>x.characterId===cid).sort((a,b)=>b.at-a.at);
 
+/* take 同 runExtract：{turns:n} = 往前数 n 轮，不折算条数 */
 async function runSummary(cid,take){
   const c=characters.find(x=>x.id===cid); if(!c) return -1;
   const me=personaOf(c);
   const all=await msgsOf(cid);
-  const ms=all.slice(-(take||30));
+  const ms=(take&&take.turns)?takeTurns(all,Math.max(1,take.turns)):all.slice(-(+take||30));
   if(ms.length<6) return 0;
   try{
     const prev=sumsOf(cid).slice(0,2).map(x=>x.text).join('\n');
@@ -6465,7 +6477,7 @@ async function sumAutoTick(){
   for(const c of characters){
     const g=chatCfg(c);
     if(g.memAuto===false||g.sumAuto===false) continue;
-    const every=Math.max(3,+g.sumEvery||30);   // 单位是**轮**
+    const every=sumEveryOf(c);                 // 单位是**轮**
     const ms=await msgsOf(c.id);
     const turns=countTurns(ms);
     if(c.sumAtT===undefined){
@@ -6473,7 +6485,7 @@ async function sumAutoTick(){
     }
     if(turns-c.sumAtT<every) continue;
     sumBusy=true;
-    const n=await runSummary(c.id,Math.min(120,takeTurns(ms,turns-c.sumAtT+1).length+6));
+    const n=await runSummary(c.id,{turns:turns-c.sumAtT});
     if(n>=0){ c.sumAt=ms.length; c.sumAtT=turns; await dbPut('characters',c); characters=await dbAll('characters'); }
     sumBusy=false;
     break;
@@ -6521,13 +6533,16 @@ function mountedMemText(char){
 /* ---------- 记忆自动提取 ----------
    EVE 的"它记得我"就靠这个：聊够一定轮数就在后台把这段对话嚼成记忆，
    下次对话由 memoryText() 自动注回提示词。用户不用管。 */
+/* 提取 / 总结的间隔，单位都是轮。角色级优先，填 0 跟随全局 */
+const memEveryOf=c=>Math.max(2,+chatCfg(c).memEvery||+S.memEvery||12);
+const sumEveryOf=c=>Math.max(3,+chatCfg(c).sumEvery||30);
 let memAutoBusy=false;
 async function memAutoTick(){
   if(memAutoBusy||sending||!db||!S.memAuto) return;
   for(const c of characters){
     const _g=chatCfg(c);
     if(_g.memAuto===false) continue;  // 这个角色单独关掉了（比如纯记事用的）
-    const every=Math.max(2,+_g.memEvery||+S.memEvery||12);   // 角色级优先，单位是**轮**
+    const every=memEveryOf(c);                // 单位是**轮**
     const ms=await msgsOf(c.id);
     const turns=countTurns(ms);
     // 老数据的 memAt 记的是条数，单位对不上 —— 第一次见到就按当前轮数落个锚，从此刻往后算
@@ -6536,7 +6551,8 @@ async function memAutoTick(){
     }
     if(turns-c.memAtT<every) continue;        // 又攒够一批轮次才提
     memAutoBusy=true;
-    const n=await runExtract(c.id,Math.min(120,takeTurns(ms,turns-c.memAtT+1).length+4));
+    // 上次之后新增了几轮就往前数几轮，一轮连发多少条都原样带上
+    const n=await runExtract(c.id,{turns:turns-c.memAtT});
     if(n>=0){
       c.memAt=ms.length; c.memAtT=turns;
       await dbPut('characters',c);
@@ -6646,8 +6662,9 @@ function renderSettings(){
     </div>
     <div class="hint">开着的话，每聊够一批就自动把值得记的事存进记忆库，
       下次对话自动带上——角色会「记得」你们发生过什么，不用你手动整理。<br>
-      单位是<b>轮</b>：你发一次 + TA 回一串算一轮。以前按<b>条</b>算，TA 一轮连发八九条，
-      「每 12 条」其实是每轮都提一次，这是调用数跑飞的主因。
+      单位是<b>轮</b>：你发一次 + TA 回一串算一轮，不管 TA 那一串是 3 条还是 30 条。
+      提取时也是<b>从最后一条往前数够轮数为止</b>，不折算成固定条数、不封顶。
+      以前按<b>条</b>算，TA 一轮连发八九条，「每 12 条」其实是每轮都提一次，这是调用数跑飞的主因。
       <b>每次提取会消耗一次 API 额度</b>，嫌费就把间隔调大或关掉。</div>
 
     <div class="grouptitle">风格示例</div>
@@ -7839,7 +7856,8 @@ function renderChatSet(){
     </div>
     <div class="hint">记忆条目是<b>档案</b>（他知道你怕什么），摘要是<b>故事线</b>（他记得你们怎么走到这一步）。
       吵架、和好这种有来龙去脉的事，靠的是摘要。<br>
-      间隔的单位是<b>轮</b>（你发一次 + TA 回一串 = 一轮），不是消息条数。每次总结花一次 API 调用。</div>
+      间隔的单位是<b>轮</b>（你发一次 + TA 回一串 = 一轮），不是消息条数。
+      总结时从最后一条往前数够轮数为止，一轮连发多少条就带多少条，不封顶。每次总结花一次 API 调用。</div>
 
     <div class="grouptitle">跨场景记忆</div>
     <div class="group"><div class="cell static">
