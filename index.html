@@ -6589,6 +6589,8 @@ function renderSettings(){
       <div class="cell static"><div class="lbl">生图接口</div><div class="val">${apiStat().img} 次</div></div>
       ${(apiStat().yChat||apiStat().yImg)?`<div class="cell static"><div class="lbl" style="color:var(--sub)">上一个有记录的日子</div>
         <div class="val">聊天 ${apiStat().yChat} · 生图 ${apiStat().yImg}</div></div>`:''}
+      <div class="cell" onclick="openApiLog()"><div class="lbl">看看每一次是谁调的</div>
+        <div class="val">${(apiStat().log||[]).length} 条记录</div>${CHEV}</div>
     </div>
     <div class="hint">每发出去一个请求就 +1，包括 429 之后的自动重试、后台定时器、TA 手机里的刷新。
       过零点清零。<b>想省次数</b>：聊天设置里关掉「模型忘了就补一次」、打开「让聊天模型直接写英文 tag」，
@@ -11195,7 +11197,7 @@ async function generateImageRaw(scene,char,opt){
   if(opt.noVibe) g={...g,vibeOn:false};
   const ep=imgEndpoint(g);
   if(!ep.base) throw new Error(useSecond?'第二后端地址没填':(g.backend==='chat'?'聊天接口地址也没填':'还没配生图地址'));
-  noteApiCall('img');
+  noteApiCall('img', g.backend==='chat'?'chatImage':(useSecond?'生图·第二后端':'生图·'+(g.backend||'')));
   // 第二后端只发画面描述：画师串 / 质量词 / 负向都是给 NAI 那类模型准备的
   const prompt=g._plain?String(scene||'').trim():buildImgPrompt(scene,char);
   const negative=g._plain?'':buildImgNegative(char);
@@ -14025,12 +14027,67 @@ function apiStat(){
   if(!a||a.d!==d) a=S.apiStat={d,chat:0,img:0,yChat:(a&&a.chat)||0,yImg:(a&&a.img)||0};
   return a;
 }
+/* 函数名 -> 人话。没列到的就显示原函数名，也比不知道强 */
+const API_WHO={
+  requestReply:'聊天回复', descToTags:'照片描述转英文 tag', runExtract:'提取记忆', runSummary:'滚动摘要',
+  proactiveSend:'TA 主动开口', showThoughts:'查看这句的心声', askDiary:'写日记', askMood:'今天心情',
+  refreshStatus:'刷新·此刻状态', refreshJournal:'刷新·起居注', refreshPhChats:'刷新·TA 的聊天',
+  refreshPhChat:'拉某段聊天', refreshLi:'刷新·X', refreshFollows:'刷新·关注列表',
+  refreshLiUser:'拉某人主页', refreshShop:'刷新·购物', refreshAllOnce:'总刷新（合并成一次）',
+  loadPostComments:'拉帖子评论', loadDmMsgs:'拉私信', aiPostMoment:'TA 发朋友圈',
+  aiCommentMoment:'TA 评论朋友圈', xReactToMyPost:'TA 对你的 X 帖反应', sendXComment:'X 评论回复',
+  sendXDm:'X 私信回复', xDmSend:'TA 用小号主动私信', shareJournal:'TA 主动讲今天的事',
+  askOracle:'旁白', evalRelation:'关系评估', callAsk:'语音通话', autoScene:'让 TA 想一个画面',
+  testConnection:'测试连接', fetchModels:'拉模型列表', chatImage:'生图（走聊天接口）'
+};
+/* 从调用栈里挖出「是谁调的」——Chrome 是 `at name (…)`，Firefox 是 `name@…` */
+function apiWho(){
+  try{
+    const st=String(new Error().stack||'').split(String.fromCharCode(10)).slice(1);
+    for(const line of st){
+      const m=line.match(/at\s+(?:async\s+)?([A-Za-z0-9_$.]+)\s*\(/)||line.match(/^\s*([A-Za-z0-9_$.]+)@/);
+      let n=m&&m[1]; if(!n) continue;
+      n=n.replace(/^.*\./,'');
+      if(/^(apiWho|noteApiCall|callAPI|apiSlot|generateImageRaw|generateImage|Promise|Object|Function|eval|new|async)$/.test(n)) continue;
+      return n;
+    }
+  }catch(e){}
+  return '';
+}
 let _statSave=null;
-function noteApiCall(kind){
+function noteApiCall(kind,extra){
   const a=apiStat();
   if(kind==='img') a.img++; else a.chat++;
+  const who=extra||apiWho();
+  a.log=[{t:Date.now(),k:kind,w:who}].concat(a.log||[]).slice(0,60);
   clearTimeout(_statSave);
   _statSave=setTimeout(()=>dbPut('settings',S),4000);
+}
+/* 最近的调用记录：看清一次发消息到底花了几次、分别是谁 */
+function openApiLog(){
+  const a=apiStat(), log=a.log||[];
+  _acts=[{t:'清空这份记录',fn:async()=>{ a.log=[]; await dbPut('settings',S); openApiLog(); }}];
+  document.getElementById('sheetTitle').textContent='最近的 API 调用';
+  document.getElementById('sheetCount').textContent=log.length?log.length+' 条':'';
+  document.getElementById('sheetSearchWrap').style.display='none';
+  // 同一秒内连着发的算一批，一次发消息通常就是一批
+  let html='', lastT=0;
+  log.forEach((x,i)=>{
+    if(i&&lastT-x.t>8000) html+=`<div style="height:1px;background:var(--line);margin:6px 18px"></div>`;
+    lastT=x.t;
+    html+=`<div style="padding:7px 18px;display:flex;gap:10px;align-items:baseline;font-size:13.5px">
+      <span style="color:var(--sub);font-variant-numeric:tabular-nums;min-width:76px">${fmtTime(x.t)}</span>
+      <span style="color:${x.k==='img'?'var(--accent)':'var(--text)'}">${esc(API_WHO[x.w]||x.w||'（认不出）')}</span>
+      <span style="margin-left:auto;color:var(--sub2);font-size:12px">${x.k==='img'?'生图':'聊天'}</span></div>`;
+  });
+  document.getElementById('sheetList').innerHTML=
+    (html||`<div style="padding:18px;color:var(--sub);font-size:13.5px">还没有记录。发一条消息再回来看。</div>`)
+    +`<div class="hint" style="margin:8px 18px 4px">从上到下是从新到旧，隔了 8 秒以上的画一条线分开——
+       一次发消息通常就是一条线之内的那一批。<b>「聊天回复」出现两次以上</b>说明你重发过或点了重新生成；
+       出现<b>「提取记忆」「滚动摘要」</b>是后台在干活，间隔在聊天设置里调；
+       出现<b>「生图（走聊天接口）」</b>说明你的生图后端设的是聊天接口，那张图也在花聊天额度。</div>`
+    +`<div class="it" onclick="runAct(0)">清空这份记录</div>`;
+  document.getElementById('sheet').classList.add('open');
 }
 function apiSlot(){
   _apiChain=_apiChain.then(async()=>{
@@ -14045,7 +14102,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function callAPI(messages,_try){
   if(!S.apiKey) throw new Error('还没填 API Key');
   if(!S.apiBase) throw new Error('还没填 API 地址');
-  noteApiCall('chat');   // 重试也是一次真请求，照记
+  noteApiCall('chat', (+_try||0)?'（上一条的第 '+(+_try)+' 次重试）':'');   // 重试也是一次真请求，照记
   await apiSlot();
   const r=await fetch(S.apiBase.replace(/\/+$/,'')+'/chat/completions',{
     method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.apiKey},
