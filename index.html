@@ -1769,7 +1769,9 @@ input[type=range]{accent-color:var(--accent)}
 
     <div class="screen overlay" id="s-x">
       <div class="navbar"><button onclick="xBack()">返回</button><div class="title"><b>X</b></div>
-        <div class="sp"></div><button id="xNavBtn" onclick="xSwitch()" style="display:none">切换账号</button></div>
+        <div class="sp"></div>
+        <button id="xDmNavBtn" onclick="openXDmList()">私信</button>
+        <button id="xNavBtn" onclick="xSwitch()" style="display:none">切换账号</button></div>
       <div class="body" id="xBody"></div>
     </div>
 
@@ -3666,10 +3668,33 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 零成本：不多一次调用，只是把本来就存着的东西放回历史里。
 
+### 2026-09-11（四）· 复读拦截 / X 私信一直没有入口 / TA 翻你的手机
+
+用户报三条。
+
+**① 角色开始复读上一轮**
+
+提示词里从来没说过「不要重复自己刚说过的话」，历史里又摆着自己上一轮的原文，模型顺着抄是很自然的事。两手都上，都不额外花调用：
+
+- 末尾重申里加一条：历史里你自己刚说完的那几条，这一轮一个字都不要重复
+- 解析完之后本地拦一道：这一轮的纯文本片段，凡是和**上一个角色连发段**里某条一模一样的，直接丢掉。整轮都是复读时反而放出去（宁可让用户看见问题，也别让这轮空掉），丢掉时 toast 说明丢了几条
+
+**② X 小号私信完全没有入口**
+
+功能是齐的——`xDmTick` 会主动发、`s-xDm` 界面在、`sendXDm` 能回——但那个「私信」按钮**只长在角色的 X 主页上**，而角色主页要从「我的关注」点进去，账号还得先刷出过帖子才会出现在关注列表里。角色主动发来的私信除了一条系统推送，界面上一个入口都没有，等于石沉大海。
+
+补三处：X 顶栏常驻「私信」按钮（有未读时显示条数并变色）、点开是全部私信的列表、X 首页多一个「私信」分组直接列出有过往来的账号带未读角标。另外 `openXDm` 进去就把 unread 清掉，原来点进去也不算读过。
+
+**③ TA 翻你的手机**（+ 面板 → 「TA翻我手机」）
+
+一直只有「你看 TA 的手机」，反过来没有。把你这一侧能被看到的东西整理给模型：X 帖子、朋友圈、日记（标注「你本来不该看到」）、心情日历、你收藏起来的聊天记录。然后让 TA 以刚翻完的口气在聊天里开口——挑一两件最戳的说，不许挨个复述，也不许用「我翻了你手机」这种交代式开场。一次调用，出来就是正常的聊天气泡。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **功能做完了不等于用得到** → X 私信从定时器到界面到回复全是通的，唯独入口藏在一个三层深、还有前置条件的位置。**主动推送类功能必须有常驻入口**：用户错过那条通知，这个功能对她就不存在。
+- **「不要重复」这种约束，模型不会自己脑补** → 提示词没写，历史里又有现成的原文可抄。凡是「不应该做什么」的约束，都得显式写出来，再在本地加一道便宜的拦截。
 - **同一个「示范比规则强」的坑，第二次踩** → 上次是分条（历史里每轮一句 → 模型只回一条），这次是镜头（历史里没有 pov 对象 → 模型不给 pov）。凡是**存进 meta、不作为消息体现**的输出要求，历史里都等于没示范过。加新的输出类型时，先问一句：它在历史里长什么样？
 - **兜底会掩盖主路径失效，还让人以为是功能正常** → 补拍每次都在跑，说明主路径从来没成功过，但用户看到的镜头一直好好的。关掉兜底才暴露真相。**兜底路径的触发率应该是可见的**，长期 100% 触发就说明主路径根本没通。
 - **「间隔」要写清是间隔什么** → `proMinutes` 实际语义是「距上一条消息多久」，用户理解的是「多久试一次」。两者在成功路径上等价，一失败就分道扬镳。写周期性任务时，间隔的锚点应该是**上次尝试**，业务状态只用来判断该不该做。
@@ -11905,8 +11930,36 @@ function xSwitch(){
     av:c.avatar,cur:c.id===xCharId,
     fn:()=>{ xCharId=c.id; renderX(); }})));
 }
+/* 私信收件箱 —— 原来只有「进某个角色的 X 主页」才能看到那个私信按钮，
+   角色主动发来的私信除了一条推送以外没有任何入口，等于石沉大海。 */
+const xDmUnread=c=>(c.xdm||[]).filter(m=>m.from==='them'&&m.unread).length;
+function xDmThreads(){
+  return characters.filter(c=>(c.xdm||[]).length||(c.li&&(c.li.posts||[]).length))
+    .sort((a,b)=>{
+      const la=(a.xdm||[]).slice(-1)[0], lb=(b.xdm||[]).slice(-1)[0];
+      return ((lb&&lb.at)||0)-((la&&la.at)||0);
+    });
+}
+function openXDmList(){
+  const list=xDmThreads();
+  if(!list.length) return toast('还没有任何 X 账号。去 TA 的手机 → X 刷新一下');
+  actionSheet('私信',list.map(c=>{
+    const last=(c.xdm||[]).slice(-1)[0], n=xDmUnread(c);
+    // actionSheet 只渲染 t，摘要拼进标题里
+    const tail=last?('　'+(last.from==='me'?'我：':'')+String(last.text).slice(0,18)):'　还没聊过';
+    return {t:(liData(c).handle||c.xname||c.name)+(n?'（'+n+'）':'')+tail,
+      av:c.avatar, fn:()=>openXDm(c.id)};
+  }));
+}
 function renderX(){
   document.getElementById('xNavBtn').style.display=xView==='user'?'':'none';
+  {
+    const b=document.getElementById('xDmNavBtn');
+    const n=characters.reduce((a,c)=>a+xDmUnread(c),0);
+    b.style.display=xView==='me'?'':'none';
+    b.textContent=n?'私信 '+n:'私信';
+    b.style.color=n?'var(--accent)':'';
+  }
   if(xView==='me') return renderXMe();
   const c=characters.find(x=>x.id===xCharId); if(!c) return;
   const L=liData(c);
@@ -11986,6 +12039,19 @@ function renderXMe(){
             <span>${IC('star',15)}${p.likes||0}</span></div>
         </div>
       </div>`).join('')}
+
+    ${(()=>{const th=characters.filter(c=>(c.xdm||[]).length);
+      if(!th.length) return '';
+      return `<div class="grouptitle" style="margin:14px 0 4px 18px">私信</div>
+      <div class="listcard" style="margin:0 14px">`+th.map(c=>{
+        const last=(c.xdm||[]).slice(-1)[0], n=xDmUnread(c);
+        return `<div class="row" onclick="openXDm('${c.id}')">
+          <div class="avatar">${avatarHTML(c.avatar)}</div>
+          <div class="main"><div class="name">${esc(liData(c).handle||c.xname||c.name)}</div>
+            <div class="desc">${esc((last.from==='me'?'我：':'')+String(last.text).slice(0,28))}</div></div>
+          <div class="side">${n?`<div class="badge">${n}</div>`:''}</div>
+        </div>`;
+      }).join('')+`</div>`;})()}
 
     ${accs.length?`<div class="grouptitle" style="margin:14px 0 8px 18px">我的关注</div>
     <div class="xfollow">${accs.map(c=>{
@@ -12186,12 +12252,17 @@ ${convo||'（还没聊过）'}
 
 /* ---------- X：私信 ---------- */
 let xDmCid=null;
-function openXDm(cid){
+async function openXDm(cid){
   xDmCid=cid;
   const c=characters.find(x=>x.id===cid);
   const L=liData(c);
   document.getElementById('xDmTitle').textContent=L.handle||c.xname||c.name;
   goTo('s-xDm',renderXDm);
+  // 进来就算读过了
+  if((c.xdm||[]).some(m=>m.unread)){
+    c.xdm=c.xdm.map(m=>m.unread?{...m,unread:false}:m);
+    await dbPut('characters',c); characters=await dbAll('characters');
+  }
 }
 function renderXDm(){
   const c=characters.find(x=>x.id===xDmCid); if(!c) return;
@@ -13704,7 +13775,8 @@ ${_style}`;
   p+=`
 
 # **最后重申**
-你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。${
+你的最终输出**【必须】**是一个严格的 JSON 数组，每个元素代表一条独立的消息。不要输出任何数组之外的文字。
+**不要复读你上一轮说过的话**——历史里你自己刚说完的那几条，这一轮一个字都不要重复。就算情绪没变，也要换新的说法、说新的内容；对方刚说了什么，你这轮就得是对那句话的反应。${
     _cfgPov.povEnabled?'\n每条消息后面跟上 `{"type":"pov","content":"..."}` 镜头对象，整轮至少一个。':''}`;
   // 历史越长，开头的格式规则越容易被冲淡 —— 在最末尾再压一遍
   if(history&&history.length>40) p+=`
@@ -13930,6 +14002,63 @@ async function retryChatImage(id){
   const m=await dbGet('messages',id); if(!m||!m.meta||!(m.meta.tags||m.meta.desc)) return;
   if(m.meta.genErr&&!confirm('上次失败：'+m.meta.genErr+'\n\n再试一次？')) return;
   m.meta.pending=true; await dbPut('messages',m); await renderChat(); genChatImage(id);
+}
+/* ---------- TA 翻你的手机 ----------
+   一直只有「你看 TA 的手机」，反过来没有。把你这一侧能被看到的东西
+   （X 帖子 / 朋友圈 / 日记 / 心情 / 你收藏的话）整理给模型，
+   让 TA 以刚翻完你手机的口气在聊天里开口。一次调用。 */
+function myPhoneBits(c){
+  const bits=[];
+  const xp=(S.xposts||[]).slice(0,6);
+  if(xp.length) bits.push('【TA 在 X 上发的】'+NL+xp.map(p=>'- '+String(p.text||'').slice(0,60)).join(NL));
+  const mm=momentsOf(c.id).filter(x=>x.author==='user').slice(0,6);
+  if(mm.length) bits.push('【TA 的朋友圈】'+NL+mm.map(x=>'- '+String(x.text||'').slice(0,60)).join(NL));
+  const dy=diariesOf(c.id).filter(x=>x.who==='user').slice(0,3);
+  if(dy.length) bits.push('【TA 的日记】只有 TA 自己写的，你本来不该看到：'+NL
+    +dy.map(x=>x.date+'：'+String(x.content||'').slice(0,220)).join(NL));
+  const md=moods.filter(x=>x.characterId===c.id&&x.who==='user').slice(-6);
+  if(md.length) bits.push('【TA 最近的心情】'+NL+md.map(x=>x.date+' '+x.emoji+' '+(x.note||'')).join(NL));
+  return bits;
+}
+async function peekMyPhone(){
+  const c=characters.find(x=>x.id===curCharId);
+  if(!c||sending) return;
+  const me=personaOf(c);
+  const favs=(await msgsOf(c.id)).filter(m=>m.fav).slice(-8);
+  const bits=myPhoneBits(c);
+  if(favs.length) bits.push('【TA 收藏起来的聊天记录】'+NL
+    +favs.map(m=>(m.role==='user'?me.name:c.name)+'：'+msgToText(m).slice(0,50)).join(NL));
+  if(!bits.length) return toast('你这边还没有可翻的东西：发条朋友圈、写篇日记、或者在 X 上发一条');
+  lockSend(true); setTyping(true);
+  try{
+    const history=historyFor(c,await msgsOf(c.id));
+    const sys=buildSystemPrompt(c,history)+`
+
+# **本次任务：你刚翻了对方的手机**
+你趁「${me.name}」不注意，拿起 TA 的手机翻了一会儿。下面是你看到的东西：
+
+${bits.join(NL+NL)}
+
+现在在聊天里开口：
+- **你确实看到了这些**，可以直接点出具体内容。是质问、调侃、发酸、心疼还是假装不知道，由你的性格和你们的关系定
+- 挑**一两件**最戳到你的说，不要挨个复述
+- 不要用"我翻了你手机"这种交代式开场，直接从内容切进去
+- 仍然遵守上面的 JSON 数组格式`;
+    const payload=[{role:'system',content:sys},...toApiMessages(history,c)];
+    let parts=parseReply(await callAPI(payload));
+    const pv=parts.find(p=>p.type==='pov');
+    parts=parts.filter(p=>p.type!=='pov'&&p.type!=='recall'&&p.type!=='transfer_action');
+    if(!parts.length) throw new Error('模型没给出能发的内容');
+    for(const p of parts){
+      const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(p),timestamp:Date.now()};
+      if(pv) row.meta={...row.meta,pov:String(pv.content||'').slice(0,300)};
+      await dbPut('messages',row);
+      if(row.type==='image') genChatImage(row.id);
+      await renderChat();
+      await new Promise(r=>setTimeout(r,paceDelay(p.content.length)));
+    }
+  }catch(e){ toast('失败：'+String(e.message).slice(0,60)); }
+  finally{ setTyping(false); lockSend(false); await renderChat(); }
 }
 /* ---------- 拍一拍：双击 TA 的头像 = 你拍了拍 TA；模型回 {"type":"pat"} = TA 拍了拍你 ---------- */
 let _avTap={id:null,t:0,timer:null};
@@ -14432,6 +14561,29 @@ ${regenNote}
       seq.push({p,pov:null});
     }
     if(leadPov&&seq.length&&!seq[0].pov) seq[0].pov=leadPov;
+    /* 复读拦截：有些模型会把上一轮原样再发一遍。一模一样的纯文本直接丢掉，
+       但至少留一条 —— 整轮都是复读时宁可放出去，也别让这轮空掉。不花额外调用。 */
+    {
+      let i=history.length-1;
+      while(i>=0&&history[i].role!=='assistant') i--;
+      const prevSaid=new Set();
+      for(;i>=0&&history[i].role==='assistant';i--){
+        const t=String(history[i].content||'').trim();
+        if(t) prevSaid.add(t);
+      }
+      if(prevSaid.size){
+        const kept=seq.filter(x=>{
+          const p=x.p||{};
+          if(p.type&&p.type!=='text') return true;
+          return !prevSaid.has(String(p.content||'').trim());
+        });
+        const dropped=seq.length-kept.length;
+        if(dropped&&kept.length){
+          seq.length=0; kept.forEach(x=>seq.push(x));
+          toast('TA 复读了上一轮的 '+dropped+' 条，已去掉');
+        }
+      }
+    }
     let parts=seq.map(x=>x.p);
     let povPart=raw.find(p=>p.type==='pov')||null;
     if(!parts.length&&reacts.length) throw new Error('只贴了表情没说话');
@@ -14544,6 +14696,7 @@ const PLUS_ITEMS=[
   {ic:'note',t:'日记',fn:()=>openDiary()},
   {ic:'thought',t:'心情',fn:()=>openMood()},
   {ic:'phone',t:'TA的手机',fn:()=>enterPhone()},
+  {ic:'thought',t:'TA翻我手机',fn:()=>peekMyPhone()},
   {ic:'star',t:'收藏',fn:()=>openFavs()},
   {ic:'oracle',t:'线上/线下',fn:()=>toggleScene()}
 ];
