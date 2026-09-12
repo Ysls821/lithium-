@@ -3719,10 +3719,28 @@ node 单测 7 条：截图那种半 JSON、合法 JSON 当字符串、前后带�
 
 X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`，所以单独补了一句短的。主聊天、主动开口、TA 翻你手机三条路径共用 `buildSystemPrompt`，一处就够。
 
+### 2026-09-12（五）· 头像框不再自动去白底，改成手动 + 可还原
+
+用户：「取消头像框自动去白底吧，它把有的头像框弄得很奇怪。」
+
+`frameCutout` 是从四角和正中心做洪水填充去底色的。问题在于**框内部本来就该是白的地方**（内圈留白、浅色描边、白色装饰）只要和四角底色接近，就会被一路连通着抠掉，框直接破一个洞。它在纯色底、元素带深描边的图上效果好，在浅色框上是灾难——而它对每张导入的图都无条件跑。
+
+改成：
+
+- **导入原样进来**（只缩放到 512，不碰像素），额外把原图存进 `f.orig`
+- 去白底挪进那个框的菜单：「去掉白底（手动）」，本来就带透明通道的图会直接告诉你不用去
+- 去完不满意，菜单里「还原成原图」，从 `orig` 重算，随时可逆
+
+裁透明边和量内圈（`frameFit`）还是自动的，那两步不改像素、只算尺寸，没有副作用。
+
+**已经被抠坏的框救不回来**：老数据里没有 `orig`，当初的原图在导入那一刻就丢了。点「还原」会提示只能重新导入。这次顺带把「不可逆的自动处理必须留原件」补上了。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **不可逆的自动处理必须留原件** → 去白底在导入时就地改掉像素，原图当场丢弃，用户发现效果不对时已经无法回头，只能重新找素材再导一次。凡是"导入即加工"的路径，加工前的那一份都要存下来，哪怕多占一倍空间。
+- **对所有输入无条件跑的启发式，迟早会毁掉某一类输入** → 洪水填充在深描边纯色底上很好用，在浅色框上是灾难。这种"多数情况有效"的算法应该是**用户点一下才跑**，或者至少给个一键撤销，不该做成导入流程里看不见的一步。
 - **给模型下禁令要带三样东西：可数的上限、允许的例外、替代手段** → 「不要滥用 X」模型无法执行，因为"滥用"没有阈值。写成"整轮最多一次""只在这三种情况用""想表达犹豫就改用断句"才可执行。
 - **同一类约束要检查所有走提示词的路径** → 主聊天、主动开口、翻手机共用 `buildSystemPrompt`，但 X 小号私信自己拼提示词，漏了就会出现"主聊天不滥用、私信里还在滥用"的怪现象。
 - **「伪装」这种设定要在 UI 和提示词两侧同时成立** → 提示词写得再好，列表里顶着角色的真头像就全白搭；反过来只把脸遮住，模型第一句自报家门也一样穿帮。凡是涉及信息不对称的玩法，先把「用户能看到什么」和「模型被告知什么」分别列一遍。
@@ -5027,6 +5045,16 @@ function applyFrameScale(){
 }
 /* 白底 / 纯色底的框图自动抠成透明：从四角和正中心做泛洪，和底色接近的连通区域变透明。
    已经有透明像素的（真 PNG）不动。 */
+/* 只缩放，不碰像素 —— 导入现在走这条，去白底改成手动 */
+async function frameResize(src,maxW){
+  const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('图片读不出来')); i.src=src; });
+  const sc=Math.min(1,(maxW||512)/Math.max(img.width,img.height));
+  if(sc>=1) return src;
+  const w=Math.max(1,Math.round(img.width*sc)), h=Math.max(1,Math.round(img.height*sc));
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  cv.getContext('2d').drawImage(img,0,0,w,h);
+  return cv.toDataURL('image/png');
+}
 async function frameCutout(src,maxW){
   const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('图片读不出来')); i.src=src; });
   const sc=Math.min(1,(maxW||512)/Math.max(img.width,img.height));
@@ -5109,16 +5137,19 @@ async function importFrames(inp){
     if(!/^image\//.test(f.type)){ toast(f.name+'：不是图片'); continue; }
     try{
       const raw=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(new Error('读不出来')); fr.readAsDataURL(f); });
-      const r=await frameCutout(raw,512);
-      const ft=await frameFit(r.src);
+      // 导入**不再自动去白底**：它会把本来就该留白的地方也抠掉，有些框直接毁了。
+      // 原图留在 orig 里，要去底就在这个框的菜单里手动点，随时能还原。
+      const raw2=await frameResize(raw,512);
+      const ft=await frameFit(raw2);
       // src = 按内容裁边后的；full = 整张画布（按模板画的框用这个，位置才准）
-      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',src:ft.src,full:r.src,fit:ft.fit,mode:'crop',dx:0,dy:0,at:Date.now()});
-      n++; if(r.cut) cut++;
+      await dbPut('frames',{id:uid(),name:f.name.replace(/\.[^.]+$/,'').slice(0,12)||'头像框',
+        src:ft.src,full:raw2,orig:raw2,fit:ft.fit,cut:false,mode:'crop',dx:0,dy:0,at:Date.now()});
+      n++;
     }catch(e){ toast(f.name+'：'+e.message); }
   }
   if(!n) return;
   frames=await dbAll('frames'); renderSettings();
-  toast('加了 '+n+' 个头像框'+(cut?'，'+cut+' 个自动去了底':''));
+  toast('加了 '+n+' 个头像框'+(n?'（原样导入，要去白底在框的菜单里点）':''));
 }
 function frameMenu(id){
   const f=frames.find(x=>x.id===id); if(!f) return;
@@ -5129,6 +5160,24 @@ function frameMenu(id){
     {ic:'edit',t:'改名字',fn:async()=>{ const n=prompt('名字：',f.name); if(n&&n.trim()){ f.name=n.trim().slice(0,12); await save(); } }},
     ...(f.full?[{ic:'sparkle',t:f.mode==='full'?'现在：按模板对齐（整张画布）　→ 改为按内容裁边':'现在：按内容裁边　→ 改为按模板对齐（整张画布）',
       fn:async()=>{ f.mode=f.mode==='full'?'crop':'full'; await save(); }}]:[]),
+    ...(f.cut?[{ic:'refresh',t:'还原成原图（撤销去白底）',fn:async()=>{
+      if(!f.orig) return toast('这个框没留原图，只能重新导入一次');
+      try{
+        const ft=await frameFit(f.orig);
+        f.full=f.orig; f.src=ft.src; f.fit=ft.fit; f.cut=false;
+        await save(); toast('还原了');
+      }catch(e){ toast('失败：'+e.message); }
+    }}]
+    :[{ic:'select',t:'去掉白底（手动）',fn:async()=>{
+      try{
+        const base=f.orig||f.full||f.src;
+        const r=await frameCutout(base,512);
+        if(!r.cut) return toast('这张本来就是透明背景，不用去');
+        const ft=await frameFit(r.src);
+        f.orig=f.orig||base; f.full=r.src; f.src=ft.src; f.fit=ft.fit; f.cut=true;
+        await save(); toast('去掉了，不满意可以还原');
+      }catch(e){ toast('失败：'+e.message); }
+    }}]),
     {ic:'note',t:`位置微调　上下 ${(+f.dy||0)>0?'+':''}${+f.dy||0}%　左右 ${(+f.dx||0)>0?'+':''}${+f.dx||0}%`,fn:()=>frameMenu(id)},
     {ic:'chev',t:'上移 3%',fn:nudge('dy',-3)},
     {ic:'chev',t:'下移 3%',fn:nudge('dy',3)},
@@ -6976,7 +7025,7 @@ function renderSettings(){
       </div>`; })()}
     <input type="file" id="frameFile" accept="image/*" multiple style="display:none" onchange="importFrames(this)">
     <div class="hint">点一个框，下面就是它自己的名字、大小、上下左右，只改这一个。<br><b>想一次套准，按模板画</b>：画布 1024×1024，头像是正中直径 788px 的圆（四边留 118px），框的内圈贴着这个圆，元素不超出画布；上传后点这个框开「按模板对齐」。项目目录和下载文件夹里有一张 <code>头像框模板_1024.png</code> 带辅助圆，垫在底下画就行。<br>
-      上传后自动处理：白底 / 纯色底抠成透明（从四角和正中心去底色，元素有描边不会误伤）、裁掉透明边。框的外径按头像的倍数放，装饰压住头像边缘一点是正常的。位置偏了点框，菜单里有上下左右微调。
+      上传<b>原样导入，不再自动去白底</b>（它会把本该留白的地方也抠掉，有的框直接毁了）。带白底的图想去底，点那个框 → 菜单里「去掉白底（手动）」，不满意随时「还原成原图」。裁掉透明边和量内圈还是自动的。框的外径按头像的倍数放，装饰压住头像边缘一点是正常的。位置偏了点框，菜单里有上下左右微调。
       给谁戴：编辑角色 / 编辑身份里选。头像是 emoji 的戴不了框，得用图片头像。</div>
 
     <div class="grouptitle">系统沉浸</div>
