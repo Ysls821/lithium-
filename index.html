@@ -3884,10 +3884,28 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 - payload 改成和主动开口同款：`historyFor()` 取历史，`[system, ...toApiMessages(history,c)]`。`buildSystemPrompt` 也改用同一份历史，原来传的是裸 `slice(-12)`
 - 失败原因真实记录：`lastShareErr` 在两处赋值——接口抛错记 `e.message`，回了但解析不出记「模型回了但解析不出可发内容：」+ 原文前 60 字。`journalTick` 把它写进 `bgFail`，设置页那一行就能看到真正的原因，不再是笼统的「没讲成」
 
+### 2026-09-12（五）· 内容生成接口 / 起居注和信息流不再天天一样 / 主动开口带由头 / 引用块字色
+
+用户两条：① 主动聊天应该有两种媒介（起居注的事、转发刷到的），而且起居注和社媒帖子每天都是那几件事，应该更开放、随机性更强；这些活不需要聊天质量，可以单独接一个 flash 模型。② 夜晚模式下引用回复角色消息，字体不跟随设置的字色。
+
+**内容生成接口**（设置 → 接口与 API → 内容生成接口）
+
+`S.api2 = {on, base, key, model, temperature}`。`callAPI` 加第三个参数 `ep`，`callGen()` 用 `genEp()` 拿到端点后调；地址或 Key 留空回落到主接口的，只换模型也行。走它的：此刻状态、起居注、TA 的聊天、X 刷新 / 评论 / 私信拉取、关注列表、购物、刷到的、今天心情、照片描述转 tag、总刷新——都是"镜子型"内容，要的是丰富不是文笔。**不走**的：聊天回复、主动开口、讲今天的事、小号私信、朋友圈、日记、记忆提取、摘要，这些是 TA 的声音。调用记录里标「生成接口」。
+
+**起居注为什么天天一样**：模型只看得到"今天"，`c.phone.journal` 只存一天，前几天做过什么它完全不知道，于是每次都收敛到同一个"典型的一天"。加了 `journalHist`（最近 10 天每天的 what 列表），提示词里给出最近 7 天「今天不要再重复这些」；再从 18 个「今天的变量」里随机抽两个（天气不一样 / 计划外小意外 / 碰到很久没联系的人 / 花了不该花的钱 …）要求自然融进时间轴。合并刷新那条路同款。
+
+**刷到的**同理：「已刷过」列表从 8 条加到 16 条，明说账号、话题、句式都不许重复；28 类「算法今天额外多推的」随机抽 3 类让它挑 1-2 类用。
+
+**主动开口带由头**：任务段加一条「开场最好有个由头：讲一件今天行程里的具体的事，或者转一条你刚刷到的，别每次都是"在干嘛"」。feedshare 格式本来就在提示词里，主动开口这条路一直能用，只是没人告诉它可以。
+
+**引用回复的字色**：带引用的气泡是单独一条渲染路径，颜色写死了 `color:#fff`，用户设了黑字绿底也照样白字。改成跟 `textMe / textTa` 走，字号也带上「我的气泡再加一点」。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **"每天都一样"的根因是模型没有昨天** → 只存当天的数据，模型就只能从人设推"典型的一天"，天天一样是必然。要多样性先给它历史（别重复什么），再给随机变量（必须加进什么），两个都要。
+- **同一种内容有几条渲染路径，样式要一起改** → 带引用的气泡和普通气泡是两段代码，普通那段早就走 CSS 变量了，引用那段还写死白色。改样式时 grep 一遍所有 `class="bubble`。
 - **发给模型的 payload 必须至少有一条 user 消息** → 裸 system 请求在很多接口上是必失败的。凡是"让角色主动做点什么"的路径，payload 形状都应该和主回复一致：system + 历史，让最后一条是对话上下文。
 - **失败原因写死成一句话等于没记** → 「没讲成，模型没给出能发的内容」这种描述把接口报错和解析失败混在一起，排查时只能猜。退避表里记的必须是真实的 `e.message` 或者原文片段。
 - **计算值相等不等于看起来相等** → 反白字、饱和底色上的字都会显小。用户报"看起来小"时先测计算值排除真 bug，排除之后要给的是补偿手段，不是解释。
@@ -4153,7 +4171,8 @@ const DEFAULT_SETTINGS={
     quality:'best quality, very aesthetic, absurdres',
     negative:'lowres, worst quality, bad anatomy, bad hands, watermark, signature, jpeg artifacts, blurry',
     artists:[{id:'a1',name:'默认',text:''}],activeArtist:'a1'},
-  img2:{on:false,backend:'chat',base:'',key:'',model:''}   // 第二后端：没有人物的图走这里
+  img2:{on:false,backend:'chat',base:'',key:'',model:''},  // 第二后端：没有人物的图走这里
+  api2:{on:false,base:'',key:'',model:'',temperature:1}    // 内容生成接口：起居注 / 刷到的 / 购物 这类不需要聊天质量的活
 };
 
 let S={...DEFAULT_SETTINGS}, characters=[], personas=[], worldbooks=[], memories=[];
@@ -6976,6 +6995,27 @@ function renderSettings(){
     <button class="btn ghost" id="s-test" onclick="testConnection()">测试连接</button>
     <div class="hint" id="testResult">地址填到 <code>/v1</code> 为止。测试会真的发一次最小请求，能验出 Key、模型名和网络是否都对。</div>
 
+    <div class="grouptitle">内容生成接口（可选）</div>
+    <div class="group">
+      <div class="cell static"><div class="main" style="flex:1;min-width:0">
+        <div class="lbl">起居注 / 刷到的 / 购物这类走单独的接口</div>
+        <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">不需要聊天质量，适合 flash 一类便宜快的模型</div></div>
+        <label class="switch"><input type="checkbox" ${(S.api2||{}).on?'checked':''}
+          onchange="S.api2={...(S.api2||{}),on:this.checked};dbPut('settings',S);renderSettings()"><i></i></label></div>
+      ${(S.api2||{}).on?`
+      <div class="field"><label>API 地址</label><input value="${esc((S.api2||{}).base||'')}" placeholder="留空 = 用上面的主接口地址"
+        oninput="S.api2={...(S.api2||{}),base:this.value.trim().replace(/\\/+$/,'')};dbPut('settings',S)"></div>
+      <div class="field"><label>API Key</label><input type="password" value="${esc((S.api2||{}).key||'')}" placeholder="留空 = 用主接口的 Key"
+        oninput="S.api2={...(S.api2||{}),key:this.value.trim()};dbPut('settings',S)"></div>
+      <div class="field"><label>模型</label><input value="${esc((S.api2||{}).model||'')}" placeholder="例如 gemini-2.5-flash"
+        oninput="S.api2={...(S.api2||{}),model:this.value.trim()};dbPut('settings',S)"></div>
+      <div class="field"><label>Temperature（建议 1.0 以上，内容才不会天天一样）</label><input type="number" step="0.1" min="0" max="2" value="${Number.isFinite(+(S.api2||{}).temperature)?+(S.api2||{}).temperature:1}"
+        oninput="S.api2={...(S.api2||{}),temperature:parseFloat(this.value)};dbPut('settings',S)"></div>`:''}
+    </div>
+    <div class="hint">走这个接口的：此刻状态、起居注、TA 的聊天、X 刷新和评论私信、关注列表、购物、刷到的、今天心情、照片描述转英文 tag、总刷新。
+      <b>不走</b>的：聊天回复、主动开口、讲今天的事、小号私信、朋友圈、日记、记忆提取、摘要——这些是 TA 的声音，留给主模型。
+      地址或 Key 留空会沿用主接口的，只换模型也行。调用记录里会标「生成接口」。</div>
+
     <div class="grouptitle">今天用了多少次</div>
     <div class="group">
       <div class="cell static"><div class="lbl">聊天接口</div><div class="val">${apiStat().chat} 次</div></div>
@@ -7604,8 +7644,9 @@ async function renderChat(toBottom){
       ${selectMode?`onclick="toggleSel('${m.id}')"`:''}>
       <span class="selbox ${selected.has(m.id)?'on':''}"></span>
       <div class="av${isMe?'':' pv'}" ${isMe?'':`onclick="event.stopPropagation();avTap('${m.id}')"`}>${avatarHTML(isMe?me.avatar:c.avatar)}</div>
-      <div class="msgwrap"><span class="bwrap">${q?`<div class="bubble" style="font-size:${cfg.fontSize}px;${
-        isMe?(cfg.bubbleMe?`background:${cfg.bubbleMe};color:#fff`:''):(cfg.bubbleTa?`background:${cfg.bubbleTa};color:#fff`:'')}">${q}${esc(m.content)}</div>`
+      <div class="msgwrap"><span class="bwrap">${q?`<div class="bubble" style="font-size:${(+cfg.fontSize||15.5)+(isMe?(+cfg.fontMeAdj||0):0)}px;${
+        isMe?(cfg.bubbleMe?`background:${cfg.bubbleMe};color:${cfg.textMe||'#fff'}`:(cfg.textMe?`color:${cfg.textMe}`:''))
+            :(cfg.bubbleTa?`background:${cfg.bubbleTa};color:${cfg.textTa||'#fff'}`:(cfg.textTa?`color:${cfg.textTa}`:''))}">${q}${esc(m.content)}</div>`
         :bubbleHTML(m,cfg,isMe)}${rc}</span></div>
       ${m.fav?`<span class="favstar">${IC('star',13,1)}</span>`:''}</div>`;
   }).join('');
@@ -8535,6 +8576,7 @@ async function proactiveSend(c,ms,g){
 # **本次任务：主动发起对话**
 对方已经 ${gap} 没有跟你说话了。现在由**你**主动发消息过去。
 - 可以是关心、分享自己刚才在做什么、想起一件事、或者只是想找 TA 说话
+- **开场最好有个由头**：讲一件你今天行程里发生的具体的事，或者转一条你刚刷到的（上面有 feedshare 格式的话就用它），别每次都是"在干嘛"
 - 要符合你的性格和你们现在的关系，不要客套、不要像客服
 - 不要问"你还在吗"这种空话，说点具体的
 - 仍然遵守上面的 JSON 数组格式`;
@@ -9026,7 +9068,7 @@ async function askMood(silent,pre){
 只输出 JSON，不要任何解释：{"emoji":"😊","note":"……"}`;
     let j=pre;
     if(j===undefined){
-      let t=(await callAPI([{role:'user',content:p}])).trim()
+      let t=(await callGen([{role:'user',content:p}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
       j=JSON.parse(t);
@@ -9852,6 +9894,13 @@ function renderApp(k){
    算法推给一个人的东西，就是这个人的镜子：兴趣、审美、最近在惦记什么、想逃避什么。
    一次调用生成 6-8 条，和剧情 / 心情挂钩但不直说。TA 可以在聊天里转发（feedshare），
    你也可以在这里点一条让 TA 转给你。 */
+const F_SEEDS=['深夜 emo 文案','宠物','手工 / DIY','旧歌翻唱','城市夜景','冷门纪录片','土味搞笑','健身打卡','装修 / 家居',
+  '考古 / 历史冷知识','奇怪的美食','某个小众爱好','街头采访','怀旧童年','职场吐槽','恋爱观察','手账 / 文具','露营 / 徒步',
+  '二手交易','租房日常','鬼故事','学习 vlog','宠物殡葬','老年人用手机','方言梗','乐队巡演','咖啡店探店','拆快递'];
+function feedVariety(){
+  const pick=[...F_SEEDS].sort(()=>Math.random()-.5).slice(0,3);
+  return NL+'今天算法额外多推了这几类（从中挑 1-2 类用进去，别全用，也别每条都是）：'+pick.join('、');
+}
 async function refreshFeed(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
   if(!silent) toast('看看 TA 在刷什么…');
@@ -9872,10 +9921,10 @@ async function refreshFeed(silent,pre){
 - ta.comment 最多给 2 条写，用你自己的语气，10-30 字
 - liked / saved 按你会不会点来定，别全是 true
 - 不要出现「${me.name}」，不要写你们的对话原文${old.length?`
-- 这些你已经刷过了，不要重复：${old.slice(0,8).map(x=>String(x.text).slice(0,20)).join(' / ')}`:''}`;
+- 这些你已经刷过了，**账号、话题、句式都不要重复**：${old.slice(0,16).map(x=>String(x.text).slice(0,18)).join(' / ')}`:''}${feedVariety()}`;
     let j=pre;
     if(j===undefined){
-      let t=(await callAPI([{role:'user',content:p}])).trim()
+      let t=(await callGen([{role:'user',content:p}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
       j=JSON.parse(t);
@@ -9982,7 +10031,7 @@ async function refreshShop(silent,pre){
 - 价格要符合你的消费水平，别乱标`;
     let j=pre;
     if(j===undefined){
-      let t=(await callAPI([{role:'user',content:p}])).trim()
+      let t=(await callGen([{role:'user',content:p}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
       j=JSON.parse(t);
@@ -10041,7 +10090,7 @@ function rfSpecOf(k,c,me){
 
   if(k==='journal') return {n:'起居注',f:'journal',t:'obj',run:v=>refreshJournal(true,v),
     spec:`  "journal": {"items":[{"time":"09:20","what":"做什么，15字内","tag":"分类2-4字，可留空","note":"这件事里发生的一个具体意外或小插曲，25字内；平淡的事留空"}]}`,
-    req:`你今天一整天的时间轴，7-10 条，从早排到晚。已经过去的时段要能解释对话里提过的事；还没到的时段是"接下来会发生什么"，要顺着当前剧情走。note 是关键——写"琴弦断了一根""楼下那只猫今天没来"这种具体小事，不要"很顺利"这种废话；大约一半条目有 note。上面【你今天的行程】是旧的，可以推进它，不要照抄`};
+    req:`你今天一整天的时间轴，7-10 条，从早排到晚。已经过去的时段要能解释对话里提过的事；还没到的时段是"接下来会发生什么"，要顺着当前剧情走。note 是关键——写"琴弦断了一根""楼下那只猫今天没来"这种具体小事，不要"很顺利"这种废话；大约一半条目有 note。上面【你今天的行程】是旧的，可以推进它，不要照抄${journalVariety(c)}`};
 
   if(k==='chats') return {n:'TA 的聊天',f:'chats',t:'arr',run:v=>refreshPhChats(true,v),
     spec:`  "chats": [{"who":"对方名字或备注","tag":"关系标签4字内，可留空","last":"最后一条内容20字内","time":"14:32 或 昨天","unread":未读数字,"msgs":[{"from":"them","text":"…"},{"from":"me","text":"…"}]}]`,
@@ -10078,7 +10127,7 @@ function rfSpecOf(k,c,me){
     const old=(((c.phone||{}).feed||{}).items)||[];
     return {n:'刷到的',f:'feed',t:'obj',run:v=>refreshFeed(true,v),
     spec:`  "feed": {"items":[{"platform":"抖音 或 小红书","author":"账号名","text":"标题或文案15-60字","tags":["标签"],"likes":点赞数,"imgDesc":"封面英文 tag，纯文字留空","ta":{"liked":false,"saved":false,"comment":"你在评论区写的，没写留空"}}]}`,
-    req:`你今天在抖音 / 小红书刷到的 6-8 条——算法推给你的东西就是你这个人的镜子。抖音是短视频文案+热梗，小红书是分享/种草/emoji 标题，两个平台都要有；至少 2 条能看出和你最近的心情或剧情有关但不直说，至少 1 条纯无聊；ta.comment 最多 2 条，用你的语气；不要出现「${me.name}」${old.length?'；这些刷过了别重复：'+old.slice(0,6).map(x=>String(x.text).slice(0,16)).join(' / '):''}`};
+    req:`你今天在抖音 / 小红书刷到的 6-8 条——算法推给你的东西就是你这个人的镜子。抖音是短视频文案+热梗，小红书是分享/种草/emoji 标题，两个平台都要有；至少 2 条能看出和你最近的心情或剧情有关但不直说，至少 1 条纯无聊；ta.comment 最多 2 条，用你的语气；不要出现「${me.name}」${old.length?'；这些刷过了，账号话题句式都别重复：'+old.slice(0,12).map(x=>String(x.text).slice(0,16)).join(' / '):''}${feedVariety()}`};
   }
   if(k==='diary'){
     const g=diaryCfg(c);
@@ -10115,7 +10164,7 @@ ${specs.map(x=>'## '+x.n+NL+x.req).join(NLNL)}
 - 每块之间要对得上：日记里提到的事，起居注、X、购物车里都该找得到影子；心情要和这一天的内容一致
 - 全部要符合你的身份、当前时间和刚才的对话，具体、生活化，不要抒情，不要模板话
 - 只输出这一个 JSON 对象，不要任何解释，不要 markdown 代码块`;
-  let t=(await callAPI([{role:'user',content:p}])).trim()
+  let t=(await callGen([{role:'user',content:p}])).trim()
     .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
   const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
   const j=JSON.parse(t);
@@ -10163,6 +10212,27 @@ async function refreshAll(){
   toast(ok===jobs.length?`刷新完了，${ok} 项`:`${ok}/${jobs.length} 项成功，其余失败`);
 }
 
+/* 起居注的多样性：模型只看得到"今天"，每天都会收敛成同一个典型的一天。
+   给它前几天做过的事（别再重复）+ 随机抽两个"今天的变量"（必须自然融进去）。 */
+const J_SEEDS=['天气和平时不一样','一个计划外的小意外打乱了安排','碰到一个很久没联系的人','某样东西坏了或者丢了',
+  '临时换了个地方','身体有点小状况','花了一笔不该花的钱','做了一件平时不会做的事','某个约定被推迟或取消',
+  '收到或捡到一样东西','一整天都在等一个消息','难得的空档，什么都没干','被人拜托了一件麻烦事','回忆起一件旧事',
+  '路上遇到一个陌生人的小插曲','手机或网络出了问题','吃到一顿意外的好饭或难吃的饭','熬夜或者起得特别早'];
+function journalVariety(c){
+  const hist=(((c.phone||{}).journalHist)||[]).slice(0,7);
+  const pick=[...J_SEEDS].sort(()=>Math.random()-.5).slice(0,2);
+  let t='';
+  if(hist.length) t+=NL+'你前几天做过的事（**今天不要再重复这些**，换别的、换顺序、换地方）：'+NL
+    +hist.map(h=>h.day+'：'+(h.whats||[]).slice(0,8).join('、')).join(NL);
+  t+=NL+'今天必须包含这两个变量（自然融进时间轴，不要点名说"变量"）：'+pick.join('；');
+  return t;
+}
+async function journalHistPush(c,items){
+  const day=today();
+  const hist=(((c.phone||{}).journalHist)||[]).filter(h=>h.day!==day);
+  hist.unshift({day,whats:items.map(x=>String(x.what||'').slice(0,20)).filter(Boolean)});
+  c.phone={...(c.phone||{}),journalHist:hist.slice(0,10)};
+}
 /* 刷新 = 让模型按当前状态生成一整块手机内容 */
 async function refreshJournal(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
@@ -10193,10 +10263,11 @@ async function refreshJournal(silent,pre){
 - **note 是关键**：不要写"很顺利"这种废话，要写具体的小事——
   "琴弦断了一根，用备用的顶上"、"楼下那只猫今天没来"、"外卖送错了但懒得退"
 - 大约一半的条目有 note，其余留空。平淡的事就是平淡的
-- 要符合你的生活状态和作息，不要编出你不会做的事`;
+- 要符合你的生活状态和作息，不要编出你不会做的事
+${journalVariety(c)}`;
     let j=pre;
     if(j===undefined){
-      let t=(await callAPI([{role:'user',content:p}])).trim()
+      let t=(await callGen([{role:'user',content:p}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
       j=JSON.parse(t);
@@ -10207,6 +10278,7 @@ async function refreshJournal(silent,pre){
         time:S1(x.time).slice(0,8),what:S1(x.what).slice(0,40),tag:S1(x.tag).slice(0,6),
         note:S1(x.note).slice(0,60),shared:false}));
     items.sort((a,b)=>jMin(a.time)-jMin(b.time));
+    await journalHistPush(c,items);
     c.phone={...(c.phone||{}),journal:{items,day:today(),at:Date.now()}};
     await dbPut('characters',c); characters=await dbAll('characters');
     if(!silent){ renderApp('calendar'); toast('好了'); }
@@ -10246,7 +10318,7 @@ async function refreshStatus(silent,pre){
 - badges 是各 App 的未读红点数，没有就写 0`;
     let j=pre;
     if(j===undefined){
-      let t=(await callAPI([{role:'user',content:prompt}])).trim()
+      let t=(await callGen([{role:'user',content:prompt}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
       j=JSON.parse(t);
@@ -13230,7 +13302,7 @@ msgs 是这段对话最近的 6-10 条消息（从早到晚，from 只能是 the
 - 不要出现 ${me.name}`;
     let arr=pre;
     if(arr===undefined){
-      let t=(await callAPI([{role:'user',content:p}])).trim()
+      let t=(await callGen([{role:'user',content:p}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
       arr=JSON.parse(t);
@@ -13269,7 +13341,7 @@ async function refreshPhChat(){
 
 只输出 JSON 数组：
 [{"from":"them","text":"…"},{"from":"me","text":"…"}]`;
-    let t=(await callAPI([{role:'user',content:p}])).trim()
+    let t=(await callGen([{role:'user',content:p}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
     const arr=JSON.parse(t);
@@ -13342,7 +13414,7 @@ ${extra?`\n## 额外要求\n${extra}`:''}
 
 只输出 JSON 数组：
 [{"who":"昵称","text":"评论","time":"3分钟前","reply":""}]`;
-    let t=(await callAPI([{role:'user',content:q}])).trim()
+    let t=(await callGen([{role:'user',content:q}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
     const arr=JSON.parse(t);
@@ -13403,7 +13475,7 @@ ${extra?`\n## 额外要求\n${extra}`:''}
 
 只输出 JSON 数组：
 [{"from":"them","text":"…"},{"from":"me","text":"…"}]`;
-    let t=(await callAPI([{role:'user',content:q}])).trim()
+    let t=(await callGen([{role:'user',content:q}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
     const arr=JSON.parse(t);
@@ -13462,7 +13534,7 @@ async function refreshLiUser(){
 博主昵称：${u.name}（@${u.handle}），简介「${u.bio||''}」
 生成 3-4 条 TA 最近发的帖子，要符合这个简介的调性，10-50 字，真实、有生活感。
 只输出 JSON 数组：[{"text":"…","time":"2小时前","likes":数字,"replies":数字}]`;
-    let t=(await callAPI([{role:'user',content:q}])).trim()
+    let t=(await callGen([{role:'user',content:q}])).trim()
       .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
     const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
     const arr=JSON.parse(t);
@@ -13494,7 +13566,7 @@ async function refreshFollows(silent,pre){
 [{"name":"昵称","handle":"英文id","bio":"简介20字内","followers":粉丝数,"following":关注数}]`;
     let arr=pre;
     if(arr===undefined){
-      let t=(await callAPI([{role:'user',content:q}])).trim()
+      let t=(await callGen([{role:'user',content:q}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\[[\s\S]*\]/); if(mm) t=mm[0];
       arr=JSON.parse(t);
@@ -13578,7 +13650,7 @@ ${first?`- posts 给 4-6 条，**其中 2-3 条 private:true**（那些是以前
 - 昵称要像真实网友，不要"用户A"这种`;
     let j=pre;
     if(j===undefined){
-      let t=(await callAPI([{role:'user',content:p}])).trim()
+      let t=(await callGen([{role:'user',content:p}])).trim()
         .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
       const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
       j=JSON.parse(t);
@@ -14457,7 +14529,7 @@ ${fixed?`
 4. 穿着：每件衣服、颜色、材质、配饰、状态（湿的、皱的、半脱的…）
 数量不限——画面复杂就多写，把描述里每个细节都落成 tag，别为了凑短而漏东西。
 逗号分隔，不要画师名，不要质量词，不要句子，不要解释。只输出 tag。`;
-  let t=(await callAPI([{role:'user',content:q}])).trim();
+  let t=(await callGen([{role:'user',content:q}])).trim();
   t=t.replace(/^```[a-z]*\s*/i,'').replace(/```\s*$/,'').replace(/^tags?\s*[:：]\s*/i,'')
      .replace(/[\r\n]+/g,', ').replace(/\s*,\s*/g,', ').replace(/(,\s*)+/g,', ').replace(/^,\s*|,\s*$/g,'').trim();
   if(!t) throw new Error('没转出 tag');
@@ -14941,18 +15013,18 @@ function apiWho(){
       const m=line.match(/at\s+(?:async\s+)?([A-Za-z0-9_$.]+)\s*\(/)||line.match(/^\s*([A-Za-z0-9_$.]+)@/);
       let n=m&&m[1]; if(!n) continue;
       n=n.replace(/^.*\./,'');
-      if(/^(apiWho|noteApiCall|callAPI|apiSlot|generateImageRaw|generateImage|Promise|Object|Function|eval|new|async)$/.test(n)) continue;
+      if(/^(apiWho|noteApiCall|callAPI|callGen|apiSlot|generateImageRaw|generateImage|Promise|Object|Function|eval|new|async)$/.test(n)) continue;
       return n;
     }
   }catch(e){}
   return '';
 }
 let _statSave=null;
-function noteApiCall(kind,extra){
+function noteApiCall(kind,extra,gen){
   const a=apiStat();
   if(kind==='img') a.img++; else a.chat++;
   const who=extra||apiWho();
-  a.log=[{t:Date.now(),k:kind,w:who}].concat(a.log||[]).slice(0,60);
+  a.log=[{t:Date.now(),k:kind,w:who,g:!!gen}].concat(a.log||[]).slice(0,60);
   clearTimeout(_statSave);
   _statSave=setTimeout(()=>dbPut('settings',S),4000);
 }
@@ -14971,7 +15043,7 @@ function openApiLog(){
     html+=`<div style="padding:7px 18px;display:flex;gap:10px;align-items:baseline;font-size:13.5px">
       <span style="color:var(--sub);font-variant-numeric:tabular-nums;min-width:76px">${fmtTime(x.t)}</span>
       <span style="color:${x.k==='img'?'var(--accent)':'var(--text)'}">${esc(API_WHO[x.w]||x.w||'（认不出）')}</span>
-      <span style="margin-left:auto;color:var(--sub2);font-size:12px">${x.k==='img'?'生图':'聊天'}</span></div>`;
+      <span style="margin-left:auto;color:var(--sub2);font-size:12px">${x.k==='img'?'生图':(x.g?'生成接口':'聊天')}</span></div>`;
   });
   document.getElementById('sheetList').innerHTML=
     (html||`<div style="padding:18px;color:var(--sub);font-size:13.5px">还没有记录。发一条消息再回来看。</div>`)
@@ -14992,14 +15064,25 @@ function apiSlot(){
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-async function callAPI(messages,_try){
-  if(!S.apiKey) throw new Error('还没填 API Key');
-  if(!S.apiBase) throw new Error('还没填 API 地址');
-  noteApiCall('chat', (+_try||0)?'（上一条的第 '+(+_try)+' 次重试）':'');   // 重试也是一次真请求，照记
+/* 内容生成接口：开了且填全了才用，否则回落到主接口 */
+function genEp(){
+  const g=S.api2||{};
+  if(!g.on||!g.model) return null;
+  return {base:g.base||S.apiBase,key:g.key||S.apiKey,model:g.model,temperature:Number.isFinite(+g.temperature)?+g.temperature:1};
+}
+/* 起居注 / 刷到的 / 购物 / 状态 / TA 的聊天 / X 刷新 / 心情 / 照片描述转 tag 走这里：
+   不需要聊天模型那种质量，但要内容丰富、有随机性 —— 适合 flash 一类又便宜又快的模型 */
+const callGen=(messages)=>callAPI(messages,0,genEp());
+async function callAPI(messages,_try,ep){
+  const base=ep?ep.base:S.apiBase, key=ep?ep.key:S.apiKey, model=ep?ep.model:S.model;
+  const temperature=ep?ep.temperature:S.temperature;
+  if(!key) throw new Error(ep?'内容生成接口没填 Key':'还没填 API Key');
+  if(!base) throw new Error(ep?'内容生成接口没填地址':'还没填 API 地址');
+  noteApiCall('chat', (+_try||0)?'（上一条的第 '+(+_try)+' 次重试）':'', !!ep);   // 重试也是一次真请求，照记
   await apiSlot();
-  const r=await fetch(S.apiBase.replace(/\/+$/,'')+'/chat/completions',{
-    method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+S.apiKey},
-    body:JSON.stringify({model:S.model,messages,temperature:S.temperature,stream:false})
+  const r=await fetch(base.replace(/\/+$/,'')+'/chat/completions',{
+    method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model,messages,temperature,stream:false})
   });
   // 429/503 是"等一下就好"，自动退避重试两次，别让用户手动重来
   const n=+_try||0;
@@ -15008,7 +15091,7 @@ async function callAPI(messages,_try){
     const wait=Number.isFinite(ra)&&ra>0?Math.min(ra*1000,20000):(n===0?3000:8000);
     console.warn('限流 '+r.status+'，'+Math.round(wait/1000)+'s 后重试（第'+(n+1)+'次）');
     await sleep(wait);
-    return callAPI(messages,n+1);
+    return callAPI(messages,n+1,ep);
   }
   // 先取原文再解析 —— 出错时接口说的话全在这里，解析失败也不能把它丢了。
   // 以前只报一句「接口返回了空内容」，把 finish_reason、usage、error body 全吞了，没法排查。
