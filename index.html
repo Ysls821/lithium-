@@ -3900,10 +3900,17 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 **引用回复的字色**：带引用的气泡是单独一条渲染路径，颜色写死了 `color:#fff`，用户设了黑字绿底也照样白字。改成跟 `textMe / textTa` 走，字号也带上「我的气泡再加一点」。
 
+### 2026-09-12（五）· 内容生成接口的模型也能拉取
+
+用户：「你做了新 api 接口，但是模型没有拉取按钮么。」
+
+主接口的拉取写死了读 `s-base / s-key`、写回 `s-model`。抽成 `fetchModelsFrom(base,key,btn)`，用 `modelTarget` 记录这次是给哪个框选；`fetchModels2()` 按 `genEp()` 同一套回落规则取地址和 Key（没填就用主接口的），选完直接写进 `S.api2.model` 落库，因为那一组是即填即存、没有保存按钮。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **复制一套配置 UI 时，把它带的辅助动作一起复制** → 主接口有拉取、测试，第二接口只复制了输入框。用户第一眼就问"拉取呢"。
 - **"每天都一样"的根因是模型没有昨天** → 只存当天的数据，模型就只能从人设推"典型的一天"，天天一样是必然。要多样性先给它历史（别重复什么），再给随机变量（必须加进什么），两个都要。
 - **同一种内容有几条渲染路径，样式要一起改** → 带引用的气泡和普通气泡是两段代码，普通那段早就走 CSS 变量了，引用那段还写死白色。改样式时 grep 一遍所有 `class="bubble`。
 - **发给模型的 payload 必须至少有一条 user 消息** → 裸 system 请求在很多接口上是必失败的。凡是"让角色主动做点什么"的路径，payload 形状都应该和主回复一致：system + 历史，让最后一条是对话上下文。
@@ -7007,8 +7014,10 @@ function renderSettings(){
         oninput="S.api2={...(S.api2||{}),base:this.value.trim().replace(/\\/+$/,'')};dbPut('settings',S)"></div>
       <div class="field"><label>API Key</label><input type="password" value="${esc((S.api2||{}).key||'')}" placeholder="留空 = 用主接口的 Key"
         oninput="S.api2={...(S.api2||{}),key:this.value.trim()};dbPut('settings',S)"></div>
-      <div class="field"><label>模型</label><input value="${esc((S.api2||{}).model||'')}" placeholder="例如 gemini-2.5-flash"
-        oninput="S.api2={...(S.api2||{}),model:this.value.trim()};dbPut('settings',S)"></div>
+      <div class="field"><label>模型</label>
+        <div class="inline"><input id="s-model2" value="${esc((S.api2||{}).model||'')}" placeholder="例如 gemini-2.5-flash"
+          oninput="S.api2={...(S.api2||{}),model:this.value.trim()};dbPut('settings',S)">
+        <button class="mini" id="s-fetch2" onclick="fetchModels2()">拉取</button></div></div>
       <div class="field"><label>Temperature（建议 1.0 以上，内容才不会天天一样）</label><input type="number" step="0.1" min="0" max="2" value="${Number.isFinite(+(S.api2||{}).temperature)?+(S.api2||{}).temperature:1}"
         oninput="S.api2={...(S.api2||{}),temperature:parseFloat(this.value)};dbPut('settings',S)"></div>`:''}
     </div>
@@ -7442,12 +7451,24 @@ async function testConnection(){
 
 /* ---------- 模型拉取 ---------- */
 let modelList=[];
+let modelTarget='s-model';
 async function fetchModels(){
-  const base=document.getElementById('s-base').value.trim().replace(/\/+$/,'');
-  const key=document.getElementById('s-key').value.trim();
+  modelTarget='s-model';
+  return fetchModelsFrom(document.getElementById('s-base').value.trim().replace(/\/+$/,''),
+    document.getElementById('s-key').value.trim(), document.getElementById('s-fetch'));
+}
+/* 内容生成接口的拉取：地址 / Key 没填就用主接口的（和 genEp 的回落规则一致） */
+async function fetchModels2(){
+  modelTarget='s-model2';
+  const g=S.api2||{};
+  const base=(g.base||document.getElementById('s-base').value.trim()).replace(/\/+$/,'');
+  const key=g.key||document.getElementById('s-key').value.trim();
+  return fetchModelsFrom(base,key,document.getElementById('s-fetch2'));
+}
+async function fetchModelsFrom(base,key,btn){
   if(!base) return toast('先填 API 地址');
   if(!key)  return toast('先填 API Key');
-  const btn=document.getElementById('s-fetch'), old=btn.textContent;
+  const old=btn.textContent;
   btn.textContent='拉取中'; btn.disabled=true;
   try{
     const r=await fetch(base+'/models',{headers:{'Authorization':'Bearer '+key}});
@@ -7471,14 +7492,20 @@ function openModelSheet(){
 }
 const filterModels=()=>renderModelList(document.getElementById('sheetSearch').value.trim().toLowerCase());
 function renderModelList(q){
-  const cur=document.getElementById('s-model').value.trim();
+  const cur=((document.getElementById(modelTarget)||{}).value||'').trim();
   const list=q?modelList.filter(m=>m.toLowerCase().includes(q)):modelList;
   document.getElementById('sheetCount').textContent=q?`${list.length} / ${modelList.length}`:`共 ${modelList.length} 个`;
   document.getElementById('sheetList').innerHTML=list.length
     ? list.map(m=>`<div class="it ${m===cur?'cur':''}" onclick="pickModel('${esc(m).replace(/'/g,"\\'")}')">${esc(m)}${TICK}</div>`).join('')
     : `<div class="none">没有匹配的模型</div>`;
 }
-function pickModel(m){ document.getElementById('s-model').value=m; closeSheet(); toast('已选择 '+m); }
+function pickModel(m){
+  const el=document.getElementById(modelTarget)||document.getElementById('s-model');
+  el.value=m;
+  // 生成接口那个框是即填即存的，选完直接落库，不用再点保存
+  if(modelTarget==='s-model2'){ S.api2={...(S.api2||{}),model:m}; dbPut('settings',S); }
+  closeSheet(); toast('已选择 '+m);
+}
 
 /* ---------- 导入导出 ---------- */
 async function exportData(){
