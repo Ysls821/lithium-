@@ -582,6 +582,11 @@ body{background:#0A0A0C;color:var(--text);
   --shadow-s:0 1px 3px rgba(0,0,0,.4);
   color:var(--text)}
 #phone.cnight:not(.imm) #s-chat textarea,#phone.cnight:not(.imm) #s-chat input{color:var(--text)}
+/* 顶栏按钮：浅色主题的强调紫压在黑底上又暗又脏，夜晚下和标题一样用亮色 */
+#phone.cnight:not(.imm) #s-chat .navbar button{color:var(--text)}
+/* 假状态栏开关：关掉后只留安全区高度、不画内容（和"添加到主屏幕"后的处理一样） */
+#phone.nosb #statusbar{height:env(safe-area-inset-top,0px);min-height:0;padding:0}
+#phone.nosb #statusbar>*{display:none}
 #phone.cnight:not(.imm):not(.himm):not(.pimm) #statusbar{background:#111114;color:#F5F5F7}
 /* 深色下气泡不要投影：黑影落在黑底上不是"立体"，是一圈糊边；我方气泡的紫光同理 */
 #phone.cnight:not(.imm) #s-chat .bubble,#phone.cnight:not(.imm) #s-chat .msg.me .bubble{box-shadow:none}
@@ -3854,10 +3859,19 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 深色界面本来就不靠投影分层，靠的是面的明度差：角色气泡 #26262C 对 #0A0A0F 的底已经足够。所以夜晚模式和系统深色下，非沉浸的聊天页一律 `box-shadow:none`。沉浸模式有背景图，没动。
 
+### 2026-09-12（五）· 夜晚模式顶栏按钮发暗 / 假状态栏开关
+
+用户：「聊天页黑夜模式下顶栏的按钮颜色怎么是坏的？另外顶部状态栏能不能给个开关。」
+
+**按钮**：`.navbar button{color:var(--accent)}`，夜晚模式那块变量只改了底色和文字色，没动 `--accent`，于是浅色主题的 #7A68F0 紫直接压在 #111114 的顶栏上——又暗又脏。实测计算值确认了：顶栏底 rgb(17,17,20)、标题 rgb(245,245,247)、按钮 rgb(122,104,240)。夜晚下按钮改用 `var(--text)`，和标题一个亮度。没去改 `--accent` 本身，因为用户可以自定义主题色，硬换成某个紫会和她选的色打架。
+
+**假状态栏开关**：设置 → 外观美化 → 顶部状态栏。`S.hideStatusBar` → `#phone.nosb`，样式直接复用「添加到主屏幕」那套：状态栏只留 `env(safe-area-inset-top)` 的高度、子元素不画，这样在刘海屏上顶栏不会顶进系统状态栏里。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **局部主题只覆盖了一半变量，另一半会用另一套主题的值** → 夜晚模式改了 bg / text / card / bar，漏了 accent，结果按钮是浅色主题的紫。做局部主题时把用到的变量列全，或者干脆让那个元素不依赖漏掉的变量。
 - **深色主题不能只换颜色变量，投影要一起处理** → 浅色下"看不见但有浮起感"的阴影，换到黑底上会变成一圈脏边。做深色时把所有 `box-shadow` 过一遍，同色系表面之间用明度差分层，别用影子。
 - **生成"某人会看到的内容"时，把人的上下文全给够，别只给 bio** → 信息流、购物车、聊天列表这类"镜子型"内容，好不好看全在于它能不能反映最近的剧情和心情。走 `storyCtx()` 是底线。
 - **新的可转发对象类型，落地清单是固定的六项** → 提示词格式、`normPart` 解析、`toMsg` 落库、气泡渲染、`msgToText`、`toApiMessages` 历史示范，外加 `sanitizeParts` 救援。表情包漏了两项、镜头漏了一项、分条漏了一项，都各自踩了一次坑；这次照清单一次做齐。
@@ -7086,6 +7100,14 @@ function renderSettings(){
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(this)">
     <div class="hint">数据只存在这台设备的浏览器里，不会上传。<br>清浏览器数据会丢，建议定期导出备份。</div>
     <div class="secband">外观美化</div>
+    <div class="grouptitle">顶部状态栏</div>
+    <div class="group"><div class="cell static"><div class="main" style="flex:1;min-width:0">
+      <div class="lbl">显示假状态栏</div>
+      <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">顶上那条时间 / 信号 / 电量</div></div>
+      <label class="switch"><input type="checkbox" ${S.hideStatusBar===true?'':'checked'}
+        onchange="S.hideStatusBar=!this.checked;dbPut('settings',S);applyStatusBar()"><i></i></label></div></div>
+    <div class="hint">关掉后只留手机自己的安全区高度，不画内容。添加到主屏幕当 App 用时系统会自带状态栏，那种情况下本来就自动不画。</div>
+
     <div class="grouptitle">主题色</div>
     <div class="group"><div class="field">
       <div class="swatch">${THEMES.map(t=>
@@ -8424,6 +8446,10 @@ async function setXdmOpen(v){
   const c=characters.find(x=>x.id===curCharId); if(!c) return;
   c.xdmOpen=!!v; await dbPut('characters',c); characters=await dbAll('characters');
   toast(v?'TA 不用再装了':'TA 会继续装不认识');
+}
+/* 顶部假状态栏（时间 / 信号 / 电量）显示与否 */
+function applyStatusBar(){
+  document.getElementById('phone').classList.toggle('nosb',S.hideStatusBar===true);
 }
 /* 聊天设置里直接换这个角色绑定的身份 */
 function switchPersonaInChat(){
@@ -15379,7 +15405,7 @@ async function ensurePersona(){
   }
   const saved=await dbGet('settings','global');
   S=saved?{...DEFAULT_SETTINGS,...saved}:{...DEFAULT_SETTINGS};
-  applyTheme(S.accent); applyFrameScale(); applyUiScale();
+  applyTheme(S.accent); applyFrameScale(); applyUiScale(); applyStatusBar();
   if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)&&!/^file:/.test(location.href)){
     navigator.serviceWorker.register('./sw.js').catch(e=>console.warn('sw 注册失败',e));
   }
