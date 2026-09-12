@@ -12961,7 +12961,7 @@ async function shareJournal(silent){
   lastShareErr='';
   const J=(c.phone||{}).journal||{};
   const pool=jPast(J).filter(x=>x.note&&!x.shared);
-  if(!pool.length){ if(!silent) toast('没有可讲的事了'); return false; }
+  if(!pool.length){ lastShareErr='起居注里没有还没讲过的事（带 note 的都讲过了，刷新起居注才有新的）'; if(!silent) toast('没有可讲的事了'); return false; }
   const pick=pool[Math.floor(Math.random()*pool.length)];
   if(!silent) toast('TA 想了想…');
   try{
