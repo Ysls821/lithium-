@@ -3735,10 +3735,28 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 **已经被抠坏的框救不回来**：老数据里没有 `orig`，当初的原图在导入那一刻就丢了。点「还原」会提示只能重新导入。这次顺带把「不可逆的自动处理必须留原件」补上了。
 
+### 2026-09-12（五）· 角色发不出表情包，发出来全是字
+
+用户：「角色有时候没办法主动发表情包，发出来都是文字。」
+
+三个原因叠在一起，每一个都会让表情包降级成一条台词。
+
+**① 名字必须一字不差**。`toMsg` 里只有两条路：`x.name===p.content` 完全相等，或者模型的描述**包含**库里的名字。模型实际会写「笑哭」（库里叫「笑哭了」）、「[翻白眼]」（带方括号）、「比心 表情」、「猫猫点头.gif」——全都匹不上，直接走 `{type:'text',content:'['+描述+']'}`，于是屏幕上出现一条写着「[笑哭]」的文字气泡。
+
+新增 `stNorm()` 归一化（去扩展名、去空格、去首尾括号方括号、去标点、去「表情/表情包」后缀）和 `findSticker()` 三级匹配：归一化后完全相等 → 互相包含（重合越长越可信，至少 2 字）→ 字符重合率 ≥ 0.75。实测「笑哭」「[翻白眼]」「比心表情包」「无语。」「猫猫点头.gif」「摸 摸 头」「翻个白眼」全部命中，而「开心」「哈哈哈哈哈哈」正确地不匹配，不会乱配一张。
+
+**② 表情包对象混进正文没人管**。`sanitizeParts` 给 pov 和照片都写了救援（从字符串里把对象抠出来还原），唯独表情包没有。模型一旦把 `{"type":"sticker",...}` 写进某条消息的文字里，用户看到的就是一坨 JSON。补上同款救援，并且只在 `findSticker` 真能找到那张图时才转，找不到就原样留着，免得把正常台词吃掉。
+
+**③ 整行就是「[笑哭]」的**，现在也会还原成表情包——前提同样是库里真有这张。
+
+顺带把提示词改清楚：「description 必须从下面这张表里**原样复制**」、「这个对象是数组里**独立的一个元素**，不要写进某条消息的文字里」、「表里没有合适的就别发」。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **让模型报一个"必须一字不差"的标识符，就得在接收端做模糊匹配** → 模型不会精确复制字符串，它会改标点、加括号、补后缀、说近义词。凡是"从列表里选一个"的协议，接收端都要归一化 + 分级兜底，只写"必须一字不差"是一厢情愿。
+- **兜底救援要覆盖所有对象类型，漏一个就有一种症状** → pov 有救援、照片有救援、表情包没有，于是"发出来是字"这个症状只在表情包上出现，排查时看起来像表情包功能坏了，其实是救援层少写了一支。新增可嵌入正文的对象类型时，`sanitizeParts` 必须同步加一支。
 - **不可逆的自动处理必须留原件** → 去白底在导入时就地改掉像素，原图当场丢弃，用户发现效果不对时已经无法回头，只能重新找素材再导一次。凡是"导入即加工"的路径，加工前的那一份都要存下来，哪怕多占一倍空间。
 - **对所有输入无条件跑的启发式，迟早会毁掉某一类输入** → 洪水填充在深描边纯色底上很好用，在浅色框上是灾难。这种"多数情况有效"的算法应该是**用户点一下才跑**，或者至少给个一键撤销，不该做成导入流程里看不见的一步。
 - **给模型下禁令要带三样东西：可数的上限、允许的例外、替代手段** → 「不要滥用 X」模型无法执行，因为"滥用"没有阈值。写成"整轮最多一次""只在这三种情况用""想表达犹豫就改用断句"才可执行。
@@ -13786,9 +13804,11 @@ ${char.bio||'（未填写）'}${ps.char}
 
 # **表情包**
 你可以发表情包，格式是在数组里放一个对象：\`{"type":"sticker","description":"表情包描述"}\`
-**只能用下面列表里的，描述必须一字不差，不要自己编：**
+**description 必须从下面这张表里原样复制**，一个字都不要改、不要加书名号方括号、不要自己编新的：
 ${stickers.map(x=>'- '+x.name).join('\n')}
-合适的时候用一个就行，以说话为主，不要每轮都发。`;
+- 这个对象是**数组里独立的一个元素**，不要把它写进某条消息的文字里，否则会被当成台词发出去
+- 表里没有合适的就别发，宁可只说话
+- 合适的时候用一个就行，以说话为主，不要每轮都发`;
   p+=`
 
 # **转账**
@@ -14197,11 +14217,46 @@ async function patChar(){
   try{ navigator.vibrate&&navigator.vibrate(25); }catch(e){}
   askAI();   // 拍完让 TA 反应一下
 }
+/* 表情包名字归一化：模型写「[笑哭]」「笑哭.gif」「笑哭 表情」，库里叫「笑哭了」——
+   原来只做「完全相等」和「描述包含名字」，对不上就退化成一条文字，
+   用户看到的就是"角色发不出表情包，发出来都是字"。 */
+const stNorm=v=>String(v||'').toLowerCase()
+  .replace(/\.(png|jpe?g|gif|webp|bmp)$/i,'')
+  .replace(/[\s\u3000]+/g,'')
+  .replace(/^[\[\【（(「『<]+|[\]\】）)」』>]+$/g,'')
+  .replace(/[，。！？~～、,.!?:：;；"'""''`·\-_*]/g,'')
+  .replace(/表情包?$/,'');
+function findSticker(desc){
+  const q=stNorm(desc);
+  if(!q||!stickers.length) return null;
+  const hit=stickers.find(x=>stNorm(x.name)===q);
+  if(hit) return hit;
+  // 互相包含，重合越长越可信
+  let best=null,bl=0;
+  for(const x of stickers){
+    const n=stNorm(x.name); if(!n) continue;
+    if(n.includes(q)||q.includes(n)){
+      const l=Math.min(n.length,q.length);
+      if(l>bl){ bl=l; best=x; }
+    }
+  }
+  if(best&&bl>=2) return best;
+  // 都不沾边就看字重合率，够高才算（避免"开心"匹到"不开心"这种还好，主要防乱配）
+  let bestR=null,br=0;
+  const qs=new Set(q);
+  for(const x of stickers){
+    const n=stNorm(x.name); if(!n) continue;
+    const ns=new Set(n);
+    let k=0; for(const ch of qs) if(ns.has(ch)) k++;
+    const r=k/Math.max(qs.size,ns.size);
+    if(r>br){ br=r; bestR=x; }
+  }
+  return br>=0.75?bestR:null;
+}
 /* 片段 -> 消息记录；表情包按描述去库里找图 */
 function toMsg(p){
   if(p.type==='sticker'){
-    const st=stickers.find(x=>x.name===p.content)
-      ||stickers.find(x=>x.name&&p.content.includes(x.name));
+    const st=findSticker(p.content);
     return st?{type:'sticker',content:st.name,meta:{src:st.src}}
              :{type:'text',content:'['+p.content+']',meta:{}};
   }
@@ -14323,6 +14378,18 @@ function sanitizeParts(parts){
       const ip=imgPartFromText(t);
       if(ip){ out.push(ip); t=''; }
     }
+    // ①d 正文里混进了表情包对象。照片和 pov 都有救援，表情包一直没有，
+    //     所以模型一旦把对象写进字符串，用户看到的就是一坨 JSON 或者一串字
+    t=t.replace(/\{[^{}]*?["']?type["']?\s*:\s*["']?(?:sticker|emoji)["']?[\s\S]*?\}/gi,m=>{
+      let d='';
+      try{ const j=JSON.parse(m); d=String(j.description||j.content||j.name||'').trim(); }
+      catch(e){
+        const mm=m.match(/["']?(?:description|content|name)["']?\s*[:=]\s*["']([\s\S]*?)["']/i);
+        if(mm) d=mm[1].trim();
+      }
+      if(d&&findSticker(d)){ out.push({type:'sticker',content:d}); return ''; }
+      return m;
+    });
     // ② 裸奔的 pov: xxx / 【镜头】xxx 这类残留
     t=t.replace(/^\s*(?:["']?pov["']?\s*[:：]|【?第三视角】?\s*[:：]?|【镜头】\s*)/i,m=>{
       return '';
@@ -14334,6 +14401,14 @@ function sanitizeParts(parts){
     for(const line of t.split(/\n+/)){
       const v=unwrapLine(line);
       if(!v) continue;
+      // 整行就是「[笑哭]」「【翻白眼】」而且库里真有这张 —— 当表情包，别当台词
+      {
+        const bare=v.match(/^[\[\【]([^\]\】]{1,20})[\]\】]$/);
+        if(bare){
+          const st=findSticker(bare[1]);
+          if(st){ out.push({type:'sticker',content:st.name}); continue; }
+        }
+      }
       for(const seg of splitSentences(v)){
         if(out.filter(x=>x.type==='text').length>=cap) break;
         out.push({type:'text',content:seg});
