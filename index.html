@@ -14399,16 +14399,17 @@ function sanitizeParts(parts){
     //    模型有时吐的是字面量 \n（两个字符）而不是真换行，一并当断行处理
     t=t.replace(/(?:\\r)?\\n/g,'\n');
     for(const line of t.split(/\n+/)){
-      const v=unwrapLine(line);
-      if(!v) continue;
-      // 整行就是「[笑哭]」「【翻白眼】」而且库里真有这张 —— 当表情包，别当台词
+      // 整行就是「[笑哭]」「【翻白眼】」而且库里真有这张 —— 当表情包，别当台词。
+      // 必须在 unwrapLine 之前判：它会把方括号当包裹符号剥掉，剥完就认不出来了
       {
-        const bare=v.match(/^[\[\【]([^\]\】]{1,20})[\]\】]$/);
+        const bare=String(line).trim().match(/^[\[\【]([^\]\】]{1,20})[\]\】]$/);
         if(bare){
           const st=findSticker(bare[1]);
           if(st){ out.push({type:'sticker',content:st.name}); continue; }
         }
       }
+      const v=unwrapLine(line);
+      if(!v) continue;
       for(const seg of splitSentences(v)){
         if(out.filter(x=>x.type==='text').length>=cap) break;
         out.push({type:'text',content:seg});
