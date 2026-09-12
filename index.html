@@ -3867,10 +3867,17 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 **假状态栏开关**：设置 → 外观美化 → 顶部状态栏。`S.hideStatusBar` → `#phone.nosb`，样式直接复用「添加到主屏幕」那套：状态栏只留 `env(safe-area-inset-top)` 的高度、子元素不画，这样在刘海屏上顶栏不会顶进系统状态栏里。
 
+### 2026-09-12（五）· 我的气泡字号单独微调
+
+用户：「用户气泡里的文字好像比角色的小一点。」实测计算值两边完全一样（同一段字，17px、同字重、同字体，气泡 143×41 像素都一模一样）。她的气泡是黑字压在饱和绿底上，视觉上就是显小——这是感知问题，不是渲染问题，但感知就是她要看的东西。
+
+加了 `chat.fontMeAdj`（-2 到 +3，步进 0.5，默认 0）：我的气泡在共用字号上再加减，角色那侧不动。聊天设置字号滑块下面多一根「我的气泡再加一点」，预览同步。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **计算值相等不等于看起来相等** → 反白字、饱和底色上的字都会显小。用户报"看起来小"时先测计算值排除真 bug，排除之后要给的是补偿手段，不是解释。
 - **局部主题只覆盖了一半变量，另一半会用另一套主题的值** → 夜晚模式改了 bg / text / card / bar，漏了 accent，结果按钮是浅色主题的紫。做局部主题时把用到的变量列全，或者干脆让那个元素不依赖漏掉的变量。
 - **深色主题不能只换颜色变量，投影要一起处理** → 浅色下"看不见但有浮起感"的阴影，换到黑底上会变成一圈脏边。做深色时把所有 `box-shadow` 过一遍，同色系表面之间用明度差分层，别用影子。
 - **生成"某人会看到的内容"时，把人的上下文全给够，别只给 bio** → 信息流、购物车、聊天列表这类"镜子型"内容，好不好看全在于它能不能反映最近的剧情和心情。走 `storyCtx()` 是底线。
@@ -4146,7 +4153,7 @@ const PAGE=40;
 
 /* 每个角色独立的聊天设置 */
 const DEFAULT_CHAT={
-  bubbleMe:'', bubbleTa:'', fontSize:15.5,
+  bubbleMe:'', bubbleTa:'', fontSize:15.5, fontMeAdj:0,
   chatBg:'', immersive:true, setImmersive:false, showInject:false, historyCount:0,
   histMode:'turn', histTurns:0,
   journalShare:false, journalRate:20, presetId:'', povEnabled:false, povFix:false, memAuto:true, noScrim:false,
@@ -7478,8 +7485,10 @@ function closeChat(){
 
 /* 把一条消息渲染成气泡内容 */
 function bubbleHTML(m,cfg,isMe){
+  // 我的气泡可以在共用字号上再加减一点：反白字、饱和底色上的字看起来会比同样字号的角色气泡小
+  const fs=(+cfg.fontSize||15.5)+(isMe?(+cfg.fontMeAdj||0):0);
   const style=`style="${isMe?(cfg.bubbleMe?`background:${cfg.bubbleMe};box-shadow:0 2px 10px ${cfg.bubbleMe}44;`:''):
-    (cfg.bubbleTa?`background:${cfg.bubbleTa};`:'')}font-size:${cfg.fontSize}px"`;
+    (cfg.bubbleTa?`background:${cfg.bubbleTa};`:'')}font-size:${fs}px"`;
   if(m.type==='image'){
     if(m.meta&&m.meta.src)
       return `<div class="bubble img pad0" ${style}>
@@ -8045,7 +8054,7 @@ function renderChatSet(){
     <div class="previewbox" ${draftChatBg?'onclick="pickChatBg()" style="cursor:pointer;'
       +`background:center/cover no-repeat url('${draftChatBg}')"`:'style="background:var(--chat-bg)"'}>
       <div class="pb ta" style="background:${g.bubbleTa||'var(--bubble-ta)'};color:${g.textTa||(g.bubbleTa?'#fff':'var(--bubble-ta-text)')};font-size:${g.fontSize}px">在呢，刚洗完澡</div>
-      <div class="pb me" style="background:${g.bubbleMe||'var(--grad)'};color:${g.textMe||'#fff'};font-size:${g.fontSize}px">这么晚还在练？</div>
+      <div class="pb me" style="background:${g.bubbleMe||'var(--grad)'};color:${g.textMe||'#fff'};font-size:${(+g.fontSize||15.5)+(+g.fontMeAdj||0)}px">这么晚还在练？</div>
     </div></div>
 
     <div class="grouptitle">我的气泡</div>
@@ -8103,6 +8112,10 @@ function renderChatSet(){
       <div class="inline"><input type="range" min="13" max="20" step=".5" value="${g.fontSize}"
         oninput="setCfg('fontSize',parseFloat(this.value))" style="flex:1">
         <span style="width:44px;text-align:right;color:var(--sub)">${g.fontSize}px</span></div>
+      <div class="field" style="margin-top:8px"><label>我的气泡再加一点</label>
+        <div class="inline"><input type="range" min="-2" max="3" step=".5" value="${+g.fontMeAdj||0}"
+          oninput="setCfg('fontMeAdj',parseFloat(this.value))" style="flex:1">
+          <span style="width:44px;text-align:right;color:var(--sub)">${(+g.fontMeAdj||0)>0?'+':''}${+g.fontMeAdj||0}px</span></div></div>
     </div></div>
 
     <div class="grouptitle">聊天背景</div>
