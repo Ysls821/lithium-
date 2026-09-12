@@ -558,6 +558,31 @@ body{background:#0A0A0C;color:var(--text);
 .bubble.xsh .xi{width:100%;border-radius:8px;margin:2px 0 5px;max-height:130px;object-fit:cover;display:block}
 .bubble.xsh .xt{font-size:13.5px;line-height:1.55;opacity:.92;border-left:2.5px solid currentColor;padding-left:8px}
 .bubble.xsh .cap{margin-top:7px}
+/* 刷到的：TA 手机里的信息流 */
+.fdcard{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:10px;cursor:pointer;box-shadow:var(--shadow-s)}
+.fdh{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:6px;color:var(--text)}
+.fdh b{font-weight:600}
+.fdl{margin-left:auto;color:var(--sub);font-size:12px}
+.fdp{font-size:10.5px;font-weight:800;padding:2px 6px;border-radius:5px;color:#fff;letter-spacing:.5px;flex:0 0 auto}
+.fdp.dy{background:#111}
+.fdp.xhs{background:#FF2442}
+.fdi{width:100%;border-radius:10px;margin:2px 0 8px;max-height:180px;object-fit:cover;display:block}
+.fdt{font-size:14px;line-height:1.6;color:var(--text)}
+.fdtags{margin-top:6px;font-size:12px;color:var(--accent)}
+.fdta{margin-top:8px;padding-top:8px;border-top:.5px solid var(--line);font-size:12.5px;color:var(--sub)}
+.fdc{margin-top:4px;color:var(--text)}
+.bubble.xsh .xh .fdp{margin:0}
+/* 聊天页夜晚模式：只在非沉浸下生效；沉浸模式有背景图自己管色 */
+#phone.cnight:not(.imm) #s-chat{
+  --chat-bg:linear-gradient(180deg,#16122B 0%,#0A0A0F 46%,#000 100%);
+  --bubble-ta:#26262C;--bubble-ta-text:#F5F5F7;
+  --text:#F5F5F7;--sub:#8E8E93;--sub2:#5C5C61;--card:#1B1B1F;
+  --line:rgba(120,120,128,.20);--line2:rgba(120,120,128,.30);
+  --nav:rgba(22,22,26,.76);--bar:#111114;--accent-soft:rgba(154,138,255,.16);
+  --shadow-s:0 1px 3px rgba(0,0,0,.4);
+  color:var(--text)}
+#phone.cnight:not(.imm) #s-chat textarea,#phone.cnight:not(.imm) #s-chat input{color:var(--text)}
+#phone.cnight:not(.imm):not(.himm):not(.pimm) #statusbar{background:#111114;color:#F5F5F7}
 /* 日记里的划掉 / 高亮 */
 .dc{white-space:pre-wrap}
 .dc s{opacity:.5;text-decoration:line-through}
@@ -3791,10 +3816,38 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 - **对不上就不出这条，绝不退化成文字**。`toMsg` 匹配失败返回 `null`，四个调用点（主回复 / 主动开口 / 讲今天的事 / 翻你手机）遇到 `null` 直接跳过并 `console.warn`。用户的原话是「以图发出来而不是文字」——发不出图就不发，一条「[某某]」的字对她来说就是失败。
 - 正文救援同步认 `id`。
 
+### 2026-09-12（五）· 「刷到的」：TA 自己刷的信息流，会转给你看 / 聊天页夜晚模式
+
+用户：「能不能做一个 char 会自由浏览的社交媒体，像抖音 / 小红书那种，char 可能会转发给 u 看。」顺带：「聊天页非沉浸模式下加个夜晚模式。」
+
+**刷到的**（TA 的手机 → 新图标「刷到的」）
+
+设计上的核心一句话：**算法推给一个人的东西，就是这个人的镜子**。所以生成提示词不是"编几条热门"，而是拿 `storyCtx()` 全套（设定、剧情、记忆、心情、行程）让模型推"这个人今天会被推什么"——至少两条要能看出和最近的心情或剧情有关但不直说，至少一条是纯无聊划走的，抖音和小红书两种平台风格都要有。每条带 TA 自己的反应：赞没赞、收没收藏、在评论区写了什么。
+
+- 一次调用出 6-8 条，存 `c.phone.feed.items`，新的插前面，去重，最多留 40 条
+- 配图走**第二后端**（都是别人发的，没有 TA 本人），一次最多 3 张，失败就停
+- 进了总刷新（`RF_DEFS` + `rfSpecOf`），合并模式下和其他几块一起 1 次调用
+
+**TA 转发给你**：两条路。
+
+- **TA 自己转**：主聊天提示词里列出最近 8 条带编号，格式 `{"type":"feedshare","id":编号,"comment":"…"}`，走正常回复，零额外调用。什么时候该转写清了：这条和你们聊的事有关、觉得对方会有反应、或者就是想分享。主动开口那条路用的是同一份提示词，所以 TA 主动找你的时候也可能是甩一条链接过来。
+- **你点一条让 TA 转**：信息流里点某条 → 「让 TA 转发给我」，模型只写转发时附的那句话，1 次调用。
+
+转发在聊天里是一张卡片（平台角标 + 账号 + 文案 + 配图 + TA 说的话），点开看全文。落库用 `fsh` 类型；`msgToText` 写成「[转发了一条抖音——账号：「文案」] TA 说的话」；`toApiMessages` 里还原成 `{"type":"feedshare","id":N,"comment":"…"}` 对象——这次一开始就把历史示范做对了，不等第四次踩坑。`storyCtx` 的 social 段也带上最近 3 条，TA 在别处提起「今天刷到一个…」时对得上。
+
+匹配失败（编号越界、文案对不上）直接丢弃不出文字，和表情包同一套原则。正文救援也补了一支。
+
+**夜晚模式**（聊天设置 → 外观 → 夜晚模式）
+
+按角色存（`chat.nightMode`）。实现是给 `#phone` 挂 `cnight` 类，只在非沉浸的聊天页和聊天设置预览时挂；`#s-chat` 下重定义那一组颜色变量（chat-bg / bubble-ta / text / sub / card / line / nav / bar），配色直接抄系统暗色那套。状态栏单独补一条，因为它在 `#s-chat` 外面。沉浸模式有背景图自己管色，不碰。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **生成"某人会看到的内容"时，把人的上下文全给够，别只给 bio** → 信息流、购物车、聊天列表这类"镜子型"内容，好不好看全在于它能不能反映最近的剧情和心情。走 `storyCtx()` 是底线。
+- **新的可转发对象类型，落地清单是固定的六项** → 提示词格式、`normPart` 解析、`toMsg` 落库、气泡渲染、`msgToText`、`toApiMessages` 历史示范，外加 `sanitizeParts` 救援。表情包漏了两项、镜头漏了一项、分条漏了一项，都各自踩了一次坑；这次照清单一次做齐。
+- **只染一个页面的主题，用「挂在容器上的类 + 局部重定义变量」** → 全局 `prefers-color-scheme` 改不动，硬改会把设置页也染黑。`#phone.cnight #s-chat{--text:…}` 这种局部变量覆盖，页面内所有靠变量的元素自动跟着变，页面外一律不受影响。
 - **"可选功能"在提示词里默认等于"不用"** → 「可以发…不要每轮都发」这种措辞，模型的理解是"不发最安全"。想让它做某件事，要写成这件事是常态、列出触发场景、再加动态提醒，三层缺一不可。
 - **让模型从列表里选，给编号不给名字** → 数字是模型最可靠的复制对象。凡是"从 N 个里选一个"，主路径用编号，名字模糊匹配只做兜底。
 - **失败时的降级输出如果用户不接受，就不要降级** → 表情包匹配失败退化成「[名字]」文字，看起来"至少没丢内容"，但对用户就是功能坏了。降级要问一句：这个降级结果用户能接受吗？不能就直接跳过。
@@ -4072,7 +4125,7 @@ const DEFAULT_CHAT={
   sumAuto:true, sumEvery:30, sumKeep:3, crossMem:true, mountIds:[],
   memCore:0, memEpisodic:0, memEvery:0,      // 0=跟随全局
   xdmEnabled:false, xdmRate:15, xdmHours:6,
-  avatarRadius:50, avatarSize:34, bubbleRadius:20, textMe:'', textTa:'', charImg:true, imgTagDirect:false,
+  avatarRadius:50, avatarSize:34, bubbleRadius:20, textMe:'', textTa:'', charImg:true, imgTagDirect:false, nightMode:false,
   proEnabled:false, proMinutes:60, proDaily:5,
   sceneMode:'online',         // online=隔着手机  offline=面对面
   styleExamples:''            // 角色专属风格示例，空=用全局的
@@ -4183,6 +4236,8 @@ function refreshImm(id){
   document.getElementById('chatBg').style.backgroundImage=ok?`url("${bg}")`:'';
   document.getElementById('phone').classList.toggle('imm',ok);
   document.getElementById('phone').classList.toggle('noscrim',!!(cfg&&cfg.noScrim));
+  // 夜晚模式：非沉浸的聊天页 / 聊天设置预览才挂，别把别的页面也染黑
+  document.getElementById('phone').classList.toggle('cnight',!ok&&!!(cfg&&cfg.nightMode)&&(id==='s-chat'||id==='s-chatSet'));
   if(ok) applyTone(bg); else document.getElementById('phone').classList.remove('lightbg');
   document.getElementById('s-chat').style.backgroundImage=(bg&&!hasImm)?`url("${bg}")`:'';
   // 非沉浸但有背景图：顶栏和输入栏改成实底，别让半透明毛玻璃压在图上变成一条脏色带
@@ -7420,6 +7475,14 @@ function bubbleHTML(m,cfg,isMe){
       <div class="xt">${esc(x.text||'')}</div>
       ${m.content?`<div class="cap">${esc(m.content)}</div>`:''}</div>`;
   }
+  if(m.type==='fsh'){
+    const x=m.meta||{};
+    return `<div class="bubble xsh" ${style} onclick="event.stopPropagation();showFeedCard('${m.id}')">
+      <div class="xh"><span class="fdp ${x.platform==='小红书'?'xhs':'dy'}">${esc(x.platform||'')}</span><b>${esc(x.author||'')}</b></div>
+      ${x.img?`<img class="xi" src="${esc(x.img)}">`:''}
+      <div class="xt">${esc(x.text||'')}</div>
+      ${m.content?`<div class="cap">${esc(m.content)}</div>`:''}</div>`;
+  }
   if(m.type==='call')
     return `<div class="bubble call" ${style} onclick="event.stopPropagation();showCallLog('${m.id}')">
       ${IC('call',17)}<span>通话 ${esc(m.meta.dur||'')}</span></div>`;
@@ -7935,6 +7998,12 @@ function renderChatSet(){
 
 
     <div class="secband">外观</div>
+    <div class="grouptitle">夜晚模式</div>
+    <div class="group"><div class="cell static"><div class="main" style="flex:1;min-width:0">
+      <div class="lbl">聊天页用深色</div>
+      <div class="desc" style="font-size:12px;color:var(--sub);margin-top:2px">只在非沉浸模式下生效，有背景图的沉浸模式自己管色</div></div>
+      <label class="switch"><input type="checkbox" ${g.nightMode?'checked':''}
+        onchange="setCfg('nightMode',this.checked,true)"><i></i></label></div></div>
     <div class="grouptitle">预览</div>
     <div class="pvwrap" style="--br:${Number.isFinite(+g.bubbleRadius)?+g.bubbleRadius:20}px;--br-t:${Math.min(7,Number.isFinite(+g.bubbleRadius)?+g.bubbleRadius:20)}px">
     <div class="previewbox" ${draftChatBg?'onclick="pickChatBg()" style="cursor:pointer;'
@@ -8354,7 +8423,7 @@ function switchPersonaInChat(){
 function setCfg(k,v,silent){
   draftCfg[k]=v;
   if(k==='chatBg') draftChatBg=v;
-  if(k==='chatBg'||k==='immersive'||k==='setImmersive') refreshImm('s-chatSet');
+  if(k==='chatBg'||k==='immersive'||k==='setImmersive'||k==='nightMode') refreshImm('s-chatSet');
   if(!silent) renderChatSet();
   else{
     const pv=document.querySelector('.previewbox');
@@ -9594,6 +9663,7 @@ function renderPhone(){
 function phoneApp(k){
   const c=characters.find(x=>x.id===curCharId);
   if(k==='shop'&&!((c.phone||{}).shop)){ openApp('shop'); return refreshShop(); }
+  if(k==='feed'&&!(((c.phone||{}).feed||{}).items||[]).length){ openApp('feed'); return refreshFeed(); }
   if(k==='mood')   return openMood();
   if(k==='diary')  return openDiary();
   if(k==='lithium')return openLi();
@@ -9611,12 +9681,13 @@ const asBrow=x=>typeof x==='string'?{title:x,site:'',time:''}:
   {title:String((x&&x.title)||'').slice(0,40),site:String((x&&x.site)||'').slice(0,20),
    time:String((x&&x.time)||'').slice(0,8)};
 
-const APP_TITLES={notes:'备忘录',music:'音乐',browser:'浏览器',calendar:'日程',chats:'聊天',shop:'购物'};
+const APP_TITLES={notes:'备忘录',music:'音乐',browser:'浏览器',calendar:'日程',chats:'聊天',shop:'购物',feed:'刷到的'};
 let curApp='';
 function openApp(k){ curApp=k; goTo('s-app',()=>renderApp(k)); }
 function appRefresh(){
   if(curApp==='calendar') return refreshJournal();
   if(curApp==='shop') return refreshShop();
+  if(curApp==='feed') return refreshFeed();
   refreshStatus();
 }
 function renderApp(k){
@@ -9674,6 +9745,20 @@ function renderApp(k){
   else if(k==='calendar'){
     renderJournal(box);
   }
+  else if(k==='feed'){
+    const items=((p.feed||{}).items)||[];
+    if(!items.length) return box.innerHTML=empty('还没刷过');
+    const nf=n=>n>=10000?(n/10000).toFixed(1)+'万':String(n||0);
+    box.innerHTML=`<div class="appwrap">`+items.map((x,i)=>`
+      <div class="fdcard" onclick="feedMenu(${i})">
+        <div class="fdh"><span class="fdp ${x.platform==='小红书'?'xhs':'dy'}">${esc(x.platform)}</span><b>${esc(x.author||'')}</b><span class="fdl">♡ ${nf(x.likes)}</span></div>
+        ${x.img?`<img class="fdi" src="${esc(x.img)}">`:''}
+        <div class="fdt">${esc(x.text||'')}</div>
+        ${(x.tags||[]).length?`<div class="fdtags">${x.tags.map(t=>'#'+esc(t)).join('　')}</div>`:''}
+        ${(x.ta&&(x.ta.liked||x.ta.saved||x.ta.comment))?`<div class="fdta">${x.ta.liked?'❤️ 赞了':''}${x.ta.saved?'　⭐ 收藏了':''}${x.ta.comment?`<div class="fdc">${esc(c.name)}：${esc(x.ta.comment)}</div>`:''}</div>`:''}
+      </div>`).join('')
+      +`<div class="hint" style="padding:12px 4px 0">算法推给 TA 的东西就是 TA 的镜子。点一条可以让 TA 转发给你；TA 自己也会在聊天里转。</div></div>`;
+  }
   else if(k==='shop'){
     const sp=p.shop||{};
     const cart=sp.cart||[], orders=sp.orders||[];
@@ -9697,6 +9782,117 @@ function renderApp(k){
   }
 }
 
+/* ---------- 刷到的：TA 在抖音 / 小红书刷到的内容 ----------
+   算法推给一个人的东西，就是这个人的镜子：兴趣、审美、最近在惦记什么、想逃避什么。
+   一次调用生成 6-8 条，和剧情 / 心情挂钩但不直说。TA 可以在聊天里转发（feedshare），
+   你也可以在这里点一条让 TA 转给你。 */
+async function refreshFeed(silent,pre){
+  const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
+  if(!silent) toast('看看 TA 在刷什么…');
+  try{
+    const ms=(await msgsOf(curCharId)).slice(-12);
+    const old=(((c.phone||{}).feed||{}).items)||[];
+    const p=`${storyCtx(c,{msgs:ms,take:14})}
+
+你在刷短视频和图文平台（抖音、小红书那种）。生成**你今天刷到的 6-8 条**——算法推给你的东西就是你这个人的镜子：你的兴趣、审美、最近在惦记什么、想逃避什么，也包括你根本不想看但总被推的。
+
+只输出 JSON：
+{"items":[{"platform":"抖音 或 小红书","author":"账号名，像真的","text":"标题或文案，15-60 字，平台风格要对","tags":["话题标签","2-4 个"],"likes":点赞数,"imgDesc":"这条的封面或配图，英文 danbooru tag；纯文字条留空","ta":{"liked":false,"saved":false,"comment":"你在评论区写的话，没写留空"}}]}
+
+要求：
+- 抖音是短视频文案 + 热梗，小红书是分享 / 种草 / 避雷 / emoji 标题；两个平台都要有
+- 至少 2 条**能看出**和你最近的心情或你们的剧情有关（算法就是这么推的），但不要直说
+- 至少 1 条是纯无聊的、你划走的
+- ta.comment 最多给 2 条写，用你自己的语气，10-30 字
+- liked / saved 按你会不会点来定，别全是 true
+- 不要出现「${me.name}」，不要写你们的对话原文${old.length?`
+- 这些你已经刷过了，不要重复：${old.slice(0,8).map(x=>String(x.text).slice(0,20)).join(' / ')}`:''}`;
+    let j=pre;
+    if(j===undefined){
+      let t=(await callAPI([{role:'user',content:p}])).trim()
+        .replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      j=JSON.parse(t);
+    }
+    const S1=x=>String(x==null?'':x).trim();
+    const num=x=>Math.max(0,Math.round(+x)||0);
+    const fresh=(Array.isArray(j.items)?j.items:[]).slice(0,8).map(x=>({
+      id:uid(), platform:/小红书|xhs|red/i.test(S1(x.platform))?'小红书':'抖音',
+      author:S1(x.author).slice(0,16), text:S1(x.text).slice(0,120),
+      tags:(Array.isArray(x.tags)?x.tags:[]).map(S1).filter(Boolean).slice(0,4),
+      likes:num(x.likes), imgDesc:S1(x.imgDesc).slice(0,160), img:null,
+      ta:{liked:!!(x.ta&&x.ta.liked),saved:!!(x.ta&&x.ta.saved),comment:S1(x.ta&&x.ta.comment).slice(0,60)},
+      at:Date.now()
+    })).filter(x=>x.text&&!old.some(o=>o.text===x.text));
+    const items=[...fresh,...old].slice(0,40);
+    c.phone={...(c.phone||{}),feed:{items,at:Date.now()}};
+    await dbPut('characters',c); characters=await dbAll('characters');
+    if(!silent){ renderApp('feed'); toast('刷到 '+fresh.length+' 条'); }
+    // 配图：都是别人发的，没有 TA 本人，走第二后端；最多 3 张，失败就停，别一路烧
+    if(img2Ready()&&imgCfg().autoPost!==false){
+      let n=0;
+      for(const it of fresh){
+        if(n>=3) break;
+        if(!it.imgDesc) continue;
+        try{
+          it.img=await generateImage(it.imgDesc,null,{source:'feed',charId:c.id,route:'second'}); n++;
+          await dbPut('characters',c); characters=await dbAll('characters');
+          if(document.getElementById('s-app').classList.contains('active')&&curApp==='feed') renderApp('feed');
+        }catch(e){ break; }
+      }
+    }
+    return true;
+  }catch(e){ if(!silent) toast('失败：'+e.message); return false; }
+}
+function feedMenu(i){
+  const c=characters.find(x=>x.id===curCharId);
+  const it=((((c||{}).phone||{}).feed||{}).items||[])[i]; if(!it) return;
+  actionSheet(String(it.text).slice(0,24),[
+    {ic:'quote',t:'让 TA 转发给我（1 次调用）',fn:()=>feedShareToChat(i)},
+    ...(it.img?[{ic:'image',t:'看大图',fn:()=>openViewer(it.img)}]:[]),
+    ...(it.imgDesc&&img2Ready()?[{ic:'sparkle',t:it.img?'重新生成配图':'生成配图',fn:async()=>{
+      try{ toast('生成中…'); it.img=await generateImage(it.imgDesc,null,{source:'feed',charId:c.id,route:'second'});
+        await dbPut('characters',c); characters=await dbAll('characters'); renderApp('feed'); }
+      catch(e){ toast('失败：'+String(e.message).slice(0,60)); } }}]:[]),
+    {ic:'trash',t:'删掉这条',danger:true,fn:async()=>{
+      c.phone.feed.items.splice(i,1); await dbPut('characters',c); characters=await dbAll('characters'); renderApp('feed'); }}
+  ]);
+}
+/* 你点一条让 TA 转到聊天里：模型只写转发时附的那句话 */
+async function feedShareToChat(i){
+  const c=characters.find(x=>x.id===curCharId);
+  const it=((((c||{}).phone||{}).feed||{}).items||[])[i]; if(!it) return;
+  const me=personaOf(c);
+  toast('TA 在想怎么说…');
+  try{
+    const ms=(await msgsOf(c.id)).slice(-10);
+    const q=`${storyCtx(c,{msgs:ms,take:10,skip:['social']})}
+
+你刚在${it.platform}刷到这条，决定转给「${esc0(me.name)}」看：
+「${it.text}」${it.ta&&it.ta.comment?`（你在评论区写过：${it.ta.comment}）`:''}
+
+写你转发时附的那句话。10-40 字，像手机上随手转发时说的，符合你的性格和你们现在的关系；可以只是"你看"，也可以借这条说点别的。
+只输出那句话，不要引号、不要解释。`;
+    const t=(await callAPI([{role:'user',content:q}])).trim().replace(/^["「『]|["」』]$/g,'').slice(0,80);
+    await dbPut('messages',{id:uid(),characterId:c.id,role:'assistant',type:'fsh',content:t,
+      meta:{platform:it.platform,author:it.author,text:it.text,img:it.img||'',fid:it.id},timestamp:Date.now()});
+    toast('转发到聊天里了');
+    if(document.getElementById('s-chat').classList.contains('active')) renderChat();
+  }catch(e){ toast('失败：'+String(e.message).slice(0,60)); }
+}
+/* 点转发气泡：看全文 */
+async function showFeedCard(id){
+  const m=(await msgsOf(curCharId)).find(x=>x.id===id); if(!m) return;
+  const x=m.meta||{};
+  _acts=[];
+  document.getElementById('sheetTitle').textContent=(x.platform||'')+'　'+(x.author||'');
+  document.getElementById('sheetCount').textContent='';
+  document.getElementById('sheetSearchWrap').style.display='none';
+  document.getElementById('sheetList').innerHTML=
+    `<div style="padding:4px 18px 14px;font-size:15px;line-height:1.75;color:var(--text)">${x.img?`<img src="${esc(x.img)}" style="width:100%;border-radius:12px;margin-bottom:10px">`:''}${esc(x.text||'')}
+     ${m.content?`<div style="margin-top:12px;padding-top:10px;border-top:.5px solid var(--line);color:var(--sub);font-size:13.5px">TA 说：${esc(m.content)}</div>`:''}</div>`;
+  document.getElementById('sheet').classList.add('open');
+}
 /* 让模型生成购物车和订单 */
 async function refreshShop(silent,pre){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
@@ -9748,6 +9944,7 @@ const RF_DEFS=[
   {k:'li',     n:'X',         d:'TA 的社媒账号：帖子 / 评论 / 私信',              fn:()=>refreshLi(true)},
   {k:'follows',n:'关注列表',  d:'TA 关注了哪些账号',                            fn:()=>refreshFollows(true)},
   {k:'shop',   n:'购物',      d:'购物车和最近的订单',                            fn:()=>refreshShop(true)},
+  {k:'feed',   n:'刷到的',    d:'TA 在抖音 / 小红书刷到的',                       fn:()=>refreshFeed(true)},
   {k:'diary',  n:'日记',      d:'让 TA 写（或重写）今天的日记',                  fn:()=>askDiary(true)},
   {k:'mood',   n:'心情',      d:'TA 今天的心情，写进心情日历',                   fn:()=>askMood(true)}
 ];
@@ -9811,6 +10008,12 @@ function rfSpecOf(k,c,me){
     "orders":[{"name":"商品名20字内","status":"待发货/运输中/已签收/退款中","time":"3天前"}]}`,
     req:`你购物软件里的样子。cart 2-4 件——躺在购物车里的东西最能看出一个人（舍不得买的、给别人看的、冲动加的）；orders 2-4 单，最近一个月内，日用品和真实生活痕迹要有，不要全是大件；价格符合你的消费水平`};
 
+  if(k==='feed'){
+    const old=(((c.phone||{}).feed||{}).items)||[];
+    return {n:'刷到的',f:'feed',t:'obj',run:v=>refreshFeed(true,v),
+    spec:`  "feed": {"items":[{"platform":"抖音 或 小红书","author":"账号名","text":"标题或文案15-60字","tags":["标签"],"likes":点赞数,"imgDesc":"封面英文 tag，纯文字留空","ta":{"liked":false,"saved":false,"comment":"你在评论区写的，没写留空"}}]}`,
+    req:`你今天在抖音 / 小红书刷到的 6-8 条——算法推给你的东西就是你这个人的镜子。抖音是短视频文案+热梗，小红书是分享/种草/emoji 标题，两个平台都要有；至少 2 条能看出和你最近的心情或剧情有关但不直说，至少 1 条纯无聊；ta.comment 最多 2 条，用你的语气；不要出现「${me.name}」${old.length?'；这些刷过了别重复：'+old.slice(0,6).map(x=>String(x.text).slice(0,16)).join(' / '):''}`};
+  }
   if(k==='diary'){
     const g=diaryCfg(c);
     const dstyle=String(g.style||'').trim();
@@ -12537,6 +12740,9 @@ function storyCtx(c,opt){
     const lp=((c.li||{}).posts||[]).slice(0,3);
     if(lp.length) out.push(NLNL+'【你 X 小号最近发的】'+NL
       +lp.map(x=>'- '+String(x.text).slice(0,50)).join(NL));
+    const fd=(((c.phone||{}).feed||{}).items||[]).slice(0,3);
+    if(fd.length) out.push(NLNL+'【你最近在抖音 / 小红书刷到的】'+NL
+      +fd.map(x=>'- ['+x.platform+'] '+String(x.text).slice(0,40)+(x.ta&&x.ta.comment?'（你评论：'+x.ta.comment+'）':'')).join(NL));
   }
   return out.join(NL);
 }
@@ -13416,7 +13622,8 @@ const APP_DEFS=[
   {k:'gallery', n:'相册',    c:'#3B82F6', ic:'image'},
   {k:'mood',    n:'心情',    c:'#8B5CF6', ic:'thought'},
   {k:'chats',   n:'聊天',    c:'#22C55E', ic:'quote'},
-  {k:'shop',    n:'购物',    c:'#F97316', ic:'star'}
+  {k:'shop',    n:'购物',    c:'#F97316', ic:'star'},
+  {k:'feed',    n:'刷到的',  c:'linear-gradient(140deg,#111 0%,#FF2442 100%)', ic:'sparkle'}
 ];
 /* dock 四个位置：前两个和主屏共用图标设置，后两个是 dock 专属 */
 const DOCK_KEYS=['chats','lithium','diary','refresh'];
@@ -13946,6 +14153,15 @@ ${stickers.map((x,i)=>(i+1)+'. '+x.name).join('\n')}
 ${_liPub.slice(0,6).map(x=>'- '+String(x.text).slice(0,50)).join(String.fromCharCode(10))}
 - text 必须是上面列表里真实存在的原文，不要编造
 - 剧情合适才转，低频使用`;
+  const _feed=(((char.phone||{}).feed||{}).items||[]).slice(0,8);
+  if(_feed.length) p+=`
+
+# **转发你刷到的**
+你最近在抖音 / 小红书刷到过这些（**前面的数字是编号**）：
+${_feed.map((x,i)=>(i+1)+'. ['+x.platform+'] '+String(x.author||'')+'：'+String(x.text||'').slice(0,50)).join(String.fromCharCode(10))}
+想转给对方看某条，在数组里放一个**独立的元素**：\`{"type":"feedshare","id":编号,"comment":"转发时说的话，可省略"}\`
+- 这条和你们聊的事有关、你觉得对方会有反应、或者你就是想分享——这些时候转
+- 一轮最多一条，低频；转的时候数组里还要有正常消息`;
   const _cfgPov=chatCfg(char);
   if(_cfgPov.povEnabled) p+=`
 
@@ -14065,6 +14281,12 @@ function toApiMessages(history,char){
           // 模型从没见过自己发出 {"type":"sticker"} 这个对象 —— 和镜头、分条一模一样的病
           const idx=stickers.findIndex(x=>x.name===src.content)+1;
           last._arr.push(idx>0?{type:'sticker',id:idx,description:src.content}:{type:'sticker',description:src.content});
+        } else if(src.type==='fsh'&&src.role==='assistant'){
+          // 转发刷到的同理：历史里要是对象，模型才知道自己转过、怎么转的
+          const items=((((char||{}).phone||{}).feed||{}).items)||[];
+          const fx=src.meta||{};
+          const idx=items.findIndex(x=>x.id===fx.fid||x.text===fx.text)+1;
+          last._arr.push(idx>0?{type:'feedshare',id:idx,comment:src.content||''}:{type:'feedshare',text:String(fx.text||'').slice(0,40),comment:src.content||''});
         } else last._arr.push(m.content);
       }
       if(wantPov){
@@ -14352,6 +14574,14 @@ function toMsg(p){
     const who=((c.li||{}).handle)||c.xname||c.name||'?';
     return {type:'xsh',content:p.content,meta:{who,text:p.xtext.slice(0,200)}};
   }
+  if(p.type==='fsh'){
+    const c=characters.find(x=>x.id===curCharId)||{};
+    const items=(((c.phone||{}).feed||{}).items)||[];
+    let it=(p.fid>0&&items[p.fid-1])||null;
+    if(!it&&p.ftext){ const q=String(p.ftext).slice(0,20); it=items.find(x=>x.text&&(x.text.includes(q)||q.includes(x.text.slice(0,20))))||null; }
+    if(!it){ console.warn('转发的那条在刷到的里找不到，丢弃',p); return null; }
+    return {type:'fsh',content:p.content,meta:{platform:it.platform,author:it.author,text:it.text,img:it.img||'',fid:it.id}};
+  }
   return {type:'text',content:p.content,meta:{}};
 }
 
@@ -14394,6 +14624,12 @@ function normPart(x){
     if(ty==='xshare'||ty==='share_post'){
       const t=pick(x.text||x.post); if(!t) return null;
       return {type:'xsh',content:pick(x.comment||''),xtext:t};
+    }
+    if(ty==='feedshare'||ty==='share_feed'||ty==='forward'){
+      const fid=parseInt(x.id!=null?x.id:x.index,10)||0;
+      const t=pick(x.text||x.title);
+      if(!fid&&!t) return null;
+      return {type:'fsh',fid,ftext:t,content:pick(x.comment||x.message||'')};
     }
     const c=pick(x.content||x.message||x.text);
     return c?{type:'text',content:c}:null;
@@ -14474,6 +14710,15 @@ function sanitizeParts(parts){
         if(mi) sid=parseInt(mi[1],10)||0;
       }
       if((sid>0&&stickers[sid-1])||(d&&findSticker(d))){ out.push({type:'sticker',content:d,sid}); return ''; }
+      return m;
+    });
+    // ①e 转发刷到的对象混进正文
+    t=t.replace(/\{[^{}]*?["']?type["']?\s*:\s*["']?(?:feedshare|share_feed)["']?[\s\S]*?\}/gi,m=>{
+      let fid=0, cm='';
+      try{ const j=JSON.parse(m); fid=parseInt(j.id!=null?j.id:j.index,10)||0; cm=String(j.comment||'').trim(); }
+      catch(e){ const mi=m.match(/["']?(?:id|index)["']?\s*[:=]\s*["']?(\d{1,3})/i); if(mi) fid=parseInt(mi[1],10)||0;
+        const mc=m.match(/["']?comment["']?\s*[:=]\s*["']([\s\S]*?)["']/i); if(mc) cm=mc[1].trim(); }
+      if(fid>0){ out.push({type:'fsh',fid,ftext:'',content:cm}); return ''; }
       return m;
     });
     // ② 裸奔的 pov: xxx / 【镜头】xxx 这类残留
@@ -14761,6 +15006,10 @@ function msgBody(m){
   if(m.type==='xsh'){
     const x=m.meta||{};
     return `[转发了一条 X 帖子——@${x.who||'?'}：「${x.text||''}」]${m.content?'　'+m.content:''}`;
+  }
+  if(m.type==='fsh'){
+    const x=m.meta||{};
+    return `[转发了一条${x.platform||''}——${x.author||''}：「${x.text||''}」]${m.content?'　'+m.content:''}`;
   }
   if(m.type==='location') return `[位置分享] ${m.content}${m.meta&&m.meta.addr?'（'+m.meta.addr+'）':''}`;
   return m.content;
