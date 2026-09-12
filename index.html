@@ -3773,10 +3773,31 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 另外在末尾重申里加了一条总规则：**上面所有示例里的字都只是占位符，绝对不要当成台词发出去**。
 
+### 2026-09-12（五）· 让角色真的想发表情包、也真的发得出来
+
+用户给了两个目标，办法不限：① 该发表情包的时候想发；② 找到合适的那张并以图发出来，不是文字。
+
+**① 想发**
+
+三件事同时做：
+
+- **历史示范**。表情包存的是 `{type:'sticker',content:名字}`，`toApiMessages` 拼历史时把它写成「[表情包：笑哭了]」一句字。模型从没见过自己发出过 `{"type":"sticker"}` 这个对象，和镜头、分条一模一样的病。现在历史里还原成 `{"type":"sticker","id":3,"description":"笑哭了"}`，它看到自己上一轮发过，这一轮才会接着发。
+- **把"什么时候该发"写具体**。原来是「合适的时候用一个就行，以说话为主，不要每轮都发」——三句话两句在劝退。改成开头就定性「表情包是你聊天的一部分，不是装饰品」，然后列五种该想发的场景：对方说了好笑的话、无语被噎住、撒娇示好道歉递台阶、一句话说完缓气氛或代替「嗯/好」、收尾不想打字了。
+- **连着没发就提醒**。`buildSystemPrompt` 数角色最近几个连发段，撞到一个表情包就停；连续 2 轮没发，提示词里多一行「你已经连续 N 轮一个表情包都没发了，这轮只要有一点情绪就发一个」。这条是动态的，发过就消失，不会变成每轮都催。
+
+**② 发得出来**
+
+- **按编号选，不按文字**。列表改成 `1. 笑哭了 / 2. 翻白眼 / …`，格式改成 `{"type":"sticker","id":2}`。数字模型能一字不差地抄，中文短语抄不准——上一版做的模糊匹配是兜底，编号才是主路径。`normPart` 认 `id / index / no / num`，`description` 仍然收，两条都通。
+- **对不上就不出这条，绝不退化成文字**。`toMsg` 匹配失败返回 `null`，四个调用点（主回复 / 主动开口 / 讲今天的事 / 翻你手机）遇到 `null` 直接跳过并 `console.warn`。用户的原话是「以图发出来而不是文字」——发不出图就不发，一条「[某某]」的字对她来说就是失败。
+- 正文救援同步认 `id`。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **"可选功能"在提示词里默认等于"不用"** → 「可以发…不要每轮都发」这种措辞，模型的理解是"不发最安全"。想让它做某件事，要写成这件事是常态、列出触发场景、再加动态提醒，三层缺一不可。
+- **让模型从列表里选，给编号不给名字** → 数字是模型最可靠的复制对象。凡是"从 N 个里选一个"，主路径用编号，名字模糊匹配只做兜底。
+- **失败时的降级输出如果用户不接受，就不要降级** → 表情包匹配失败退化成「[名字]」文字，看起来"至少没丢内容"，但对用户就是功能坏了。降级要问一句：这个降级结果用户能接受吗？不能就直接跳过。
 - **提示词里的示例不能写得像真台词** → 越生动越好记，也就越容易被原样抄走。示例只演示**格式**，内容一律用「你的第一句话」这种一眼看出是占位的字符串；越靠近提示词末尾的示例越危险，模型对结尾的记忆最强。
 - **下游的拦截会掩盖上游的病因** → 复读拦截把重复部分吃掉之后，用户看到的症状是"只发了一条"，完全指不向"模型在抄示例"。加任何自动清理时都要想一想：它清掉的东西，会不会正好是诊断线索。
 - **让模型报一个"必须一字不差"的标识符，就得在接收端做模糊匹配** → 模型不会精确复制字符串，它会改标点、加括号、补后缀、说近义词。凡是"从列表里选一个"的协议，接收端都要归一化 + 分级兜底，只写"必须一字不差"是一厢情愿。
@@ -8388,7 +8409,8 @@ async function proactiveSend(c,ms,g){
   parts=parts.filter(p=>p.type!=='pov'&&p.type!=='recall'&&p.type!=='transfer_action');
   if(!parts.length) return false;
   for(const p of parts){
-    const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(p),timestamp:Date.now()};
+    const _tm=toMsg(p); if(!_tm) continue;
+    const row={id:uid(),characterId:c.id,role:'assistant',..._tm,timestamp:Date.now()};
     if(_pv) row.meta={...row.meta,pov:String(_pv.content||'').slice(0,300)};
     await dbPut('messages',row);
     if(row.type==='image') genChatImage(row.id);
@@ -12682,7 +12704,8 @@ async function shareJournal(silent){
     parts=parts.filter(x=>x.type!=='pov'&&x.type!=='recall'&&x.type!=='transfer_action');
     if(!parts.length) return false;
     for(const x of parts){
-      const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(x),timestamp:Date.now()};
+      const _tm=toMsg(x); if(!_tm) continue;
+      const row={id:uid(),characterId:c.id,role:'assistant',..._tm,timestamp:Date.now()};
       if(_pv) row.meta={...row.meta,pov:String(_pv.content||'').slice(0,300)};
       await dbPut('messages',row);
       if(row.type==='image') genChatImage(row.id);
@@ -13824,15 +13847,35 @@ ${char.bio||'（未填写）'}${ps.char}
 - **重要**：用户消息中的括号()内容是环境或心理描写，你可以把它当作背景信息，但不能表现得像"听到"了用户的内心想法，只能对括号外的实际话语作出回应`;
   if(mem) p+=`
 - **记忆的用法**：上面的记忆是你本来就知道的事，可以自然带出来，但**不要刻意罗列或复述**，更不要说"我记得你说过…"这种台词腔`;
-  if(stickers.length) p+=`
+  if(stickers.length){
+    // 连着几轮没发过表情包 —— 越久没发越该提醒。只数角色的连发段，撞到一个表情包就停
+    let _silent=0;
+    {
+      const runs=[];
+      for(const m of (history||[])){ const L=runs[runs.length-1]; if(L&&L.role===m.role) L.ms.push(m); else runs.push({role:m.role,ms:[m]}); }
+      for(let i=runs.length-1;i>=0;i--){ const r=runs[i]; if(r.role!=='assistant') continue; if(r.ms.some(m=>m.type==='sticker')) break; _silent++; }
+    }
+    p+=`
 
 # **表情包**
-你可以发表情包，格式是在数组里放一个对象：\`{"type":"sticker","description":"表情包描述"}\`
-**description 必须从下面这张表里原样复制**，一个字都不要改、不要加书名号方括号、不要自己编新的：
-${stickers.map(x=>'- '+x.name).join('\n')}
-- 这个对象是**数组里独立的一个元素**，不要把它写进某条消息的文字里，否则会被当成台词发出去
-- 表里没有合适的就别发，宁可只说话
-- 合适的时候用一个就行，以说话为主，不要每轮都发`;
+表情包是你聊天的一部分，不是装饰品——真人在手机上聊天，该发图的时候就发图。这是你手机里存的表情包，**前面的数字是编号**：
+${stickers.map((x,i)=>(i+1)+'. '+x.name).join('\n')}
+
+发法：在数组里放一个**独立的元素** \`{"type":"sticker","id":编号}\`，id 填上面的数字。比如想发第 2 个就是 \`{"type":"sticker","id":2}\`。
+
+**这些时候你应该想发一个**：
+- 对方说了好笑的话，或者你想笑但不想打字
+- 无语、翻白眼、被噎住、不想接这句
+- 撒娇、示好、道歉的时候递个台阶
+- 一句话说完想缓一下气氛，或者用一张图代替一句「嗯」「好」「知道了」
+- 话说完了、想收尾、不想再打字了
+
+规则：
+- 一轮最多一个；**不能只发表情包不说话**，数组里还要有正常消息
+- 只能选上面的编号，别的一律不要；实在没有贴切的就这轮不发
+- 它是数组里单独的一个元素，不要写进某句话的文字里${_silent>=2?`
+- **你已经连续 ${_silent} 轮一个表情包都没发了**。这轮只要有一点情绪——好笑、无语、心软、想撒娇——就发一个`:''}`;
+  }
   p+=`
 
 # **转账**
@@ -14015,7 +14058,15 @@ function toApiMessages(history,char){
       if(!(last&&last.role==='assistant'&&Array.isArray(last._arr))){
         out.push({role:'assistant',_arr:[]}); last=out[out.length-1];
       }
-      last._arr.push(m.content);
+      {
+        const src=history[i]||{};
+        if(src.type==='sticker'&&src.role==='assistant'){
+          // 表情包存的是 {type:'sticker',content:名字}，历史里原来只写成「[表情包：xx]」一句字，
+          // 模型从没见过自己发出 {"type":"sticker"} 这个对象 —— 和镜头、分条一模一样的病
+          const idx=stickers.findIndex(x=>x.name===src.content)+1;
+          last._arr.push(idx>0?{type:'sticker',id:idx,description:src.content}:{type:'sticker',description:src.content});
+        } else last._arr.push(m.content);
+      }
       if(wantPov){
         const src=history[i]||{};
         const pv=(src.meta&&src.meta.pov)?String(src.meta.pov):'';
@@ -14215,7 +14266,8 @@ ${bits.join(NL+NL)}
     parts=parts.filter(p=>p.type!=='pov'&&p.type!=='recall'&&p.type!=='transfer_action');
     if(!parts.length) throw new Error('模型没给出能发的内容');
     for(const p of parts){
-      const row={id:uid(),characterId:c.id,role:'assistant',...toMsg(p),timestamp:Date.now()};
+      const _tm=toMsg(p); if(!_tm) continue;
+      const row={id:uid(),characterId:c.id,role:'assistant',..._tm,timestamp:Date.now()};
       if(pv) row.meta={...row.meta,pov:String(pv.content||'').slice(0,300)};
       await dbPut('messages',row);
       if(row.type==='image') genChatImage(row.id);
@@ -14282,9 +14334,11 @@ function findSticker(desc){
 /* 片段 -> 消息记录；表情包按描述去库里找图 */
 function toMsg(p){
   if(p.type==='sticker'){
-    const st=findSticker(p.content);
-    return st?{type:'sticker',content:st.name,meta:{src:st.src}}
-             :{type:'text',content:'['+p.content+']',meta:{}};
+    let st=null;
+    if(p.sid>0) st=stickers[p.sid-1]||null;              // 编号从 1 开始
+    if(!st&&p.content) st=findSticker(p.content);
+    if(!st){ console.warn('表情包对不上，这条不出',p); return null; }   // 宁可不发，也不发成一条文字
+    return {type:'sticker',content:st.name,meta:{src:st.src}};
   }
   if(p.type==='pat') return {type:'pat',content:'',meta:{}};
   if(p.type==='transfer') return {type:'transfer',content:p.content,
@@ -14308,8 +14362,12 @@ function normPart(x){
   if(x&&typeof x==='object'){
     const ty=String(x.type||'').toLowerCase();
     const pick=v=>String(v==null?'':v).trim();
-    if(ty==='sticker'||ty==='emoji')
-      { const c=pick(x.description||x.content||x.name); return c?{type:'sticker',content:c}:null; }
+    if(ty==='sticker'||ty==='emoji'){
+      const c=pick(x.description||x.content||x.name);
+      const sid=parseInt(x.id!=null?x.id:(x.index!=null?x.index:(x.no!=null?x.no:x.num)),10);
+      if(!c&&!(sid>0)) return null;
+      return {type:'sticker',content:c,sid:sid>0?sid:0};
+    }
     if(ty==='recall') return {type:'recall',content:''};
     if(ty==='pat'||ty==='nudge'||ty==='poke') return {type:'pat',content:''};
     if(ty==='transfer'){
@@ -14407,13 +14465,15 @@ function sanitizeParts(parts){
     // ①d 正文里混进了表情包对象。照片和 pov 都有救援，表情包一直没有，
     //     所以模型一旦把对象写进字符串，用户看到的就是一坨 JSON 或者一串字
     t=t.replace(/\{[^{}]*?["']?type["']?\s*:\s*["']?(?:sticker|emoji)["']?[\s\S]*?\}/gi,m=>{
-      let d='';
-      try{ const j=JSON.parse(m); d=String(j.description||j.content||j.name||'').trim(); }
+      let d='', sid=0;
+      try{ const j=JSON.parse(m); d=String(j.description||j.content||j.name||'').trim(); sid=parseInt(j.id!=null?j.id:j.index,10)||0; }
       catch(e){
         const mm=m.match(/["']?(?:description|content|name)["']?\s*[:=]\s*["']([\s\S]*?)["']/i);
         if(mm) d=mm[1].trim();
+        const mi=m.match(/["']?(?:id|index)["']?\s*[:=]\s*["']?(\d{1,3})/i);
+        if(mi) sid=parseInt(mi[1],10)||0;
       }
-      if(d&&findSticker(d)){ out.push({type:'sticker',content:d}); return ''; }
+      if((sid>0&&stickers[sid-1])||(d&&findSticker(d))){ out.push({type:'sticker',content:d,sid}); return ''; }
       return m;
     });
     // ② 裸奔的 pov: xxx / 【镜头】xxx 这类残留
@@ -14845,7 +14905,8 @@ ${_lp?`上一个镜头（你刚才的状态）：「${String(_lp.meta.pov).slice
       const p=it.p;
       if(p.type==='recall'){ await doAiRecall(); continue; }
       if(p.type==='transfer_action'){ await aiTfAct(p.content); continue; }
-      const row={id:uid(),characterId:curCharId,role:'assistant',...toMsg(p),timestamp:Date.now()};
+      const _tm=toMsg(p); if(!_tm) continue;
+      const row={id:uid(),characterId:curCharId,role:'assistant',..._tm,timestamp:Date.now()};
       if(it.pov) row.meta={...row.meta,pov:it.pov};
       await dbPut('messages',row);
       if(row.type==='image') genChatImage(row.id);
