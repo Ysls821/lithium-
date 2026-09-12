@@ -12955,15 +12955,20 @@ function renderJournal(box){
 }
 
 /* 异地时有概率主动分享今天的事 */
+let lastShareErr='';
 async function shareJournal(silent){
   const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
+  lastShareErr='';
   const J=(c.phone||{}).journal||{};
   const pool=jPast(J).filter(x=>x.note&&!x.shared);
   if(!pool.length){ if(!silent) toast('没有可讲的事了'); return false; }
   const pick=pool[Math.floor(Math.random()*pool.length)];
   if(!silent) toast('TA 想了想…');
   try{
-    const p=buildSystemPrompt(c,(await msgsOf(c.id)).slice(-12))+`
+    // 原来 payload 只有一条 system、没有任何历史和 user 轮次 —— 很多接口对这种请求直接回空，
+    // 于是每次都"失败"。改成和主动开口同款：system + 历史
+    const history=historyFor(c,await msgsOf(c.id));
+    const p=buildSystemPrompt(c,history)+`
 
 # **本次任务：主动讲今天的一件事**
 今天 ${pick.time||''} 你${pick.what}，过程中：${pick.note}
@@ -12971,10 +12976,11 @@ async function shareJournal(silent){
 - 像随口提起，不要像汇报，不要说"今天我做了以下几件事"
 - 可以只讲一半、可以抱怨、可以炫耀，看你的性格
 - 仍然遵守上面的 JSON 数组格式`;
-    let parts=parseReply(await callAPI([{role:'system',content:p}]));
+    const raw=await callAPI([{role:'system',content:p},...toApiMessages(history,c)]);
+    let parts=parseReply(raw);
     const _pv=parts.find(x=>x.type==='pov');
     parts=parts.filter(x=>x.type!=='pov'&&x.type!=='recall'&&x.type!=='transfer_action');
-    if(!parts.length) return false;
+    if(!parts.length){ lastShareErr='模型回了但解析不出可发内容：'+String(raw||'').trim().slice(0,60); return false; }
     for(const x of parts){
       const _tm=toMsg(x); if(!_tm) continue;
       const row={id:uid(),characterId:c.id,role:'assistant',..._tm,timestamp:Date.now()};
@@ -12989,7 +12995,7 @@ async function shareJournal(silent){
     else if(curCharId===c.id&&document.getElementById('s-chat').classList.contains('active'))
       await renderChat();
     return true;
-  }catch(e){ if(!silent) toast('失败：'+e.message); return false; }
+  }catch(e){ lastShareErr=String(e&&e.message||e); if(!silent) toast('失败：'+e.message); return false; }
 }
 
 /* 跟主动消息一起跑：异地 + 有没讲过的事 + 掷骰子 */
@@ -13013,7 +13019,7 @@ async function journalTick(){
     let ok=false;
     try{ ok=await shareJournal(true); }catch(e){ ok=false; }
     curCharId=keep;
-    if(ok) await bgOk(c,'share'); else await bgFail(c,'share','没讲成，模型没给出能发的内容');
+    if(ok) await bgOk(c,'share'); else await bgFail(c,'share',lastShareErr||'没讲成');
     break;
   }
 }
