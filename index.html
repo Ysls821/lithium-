@@ -549,7 +549,7 @@ body{background:#0A0A0C;color:var(--text);
   display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--nav)}
 
 /* 消息类型 */
-.bubble.img,.bubble.voice,.bubble.loc,.bubble.sticker,.bubble.fake,.bubble.tf,.bubble.call,.bubble.xsh{white-space:normal}
+.bubble.img,.bubble.voice,.bubble.loc,.bubble.sticker,.bubble.fake,.bubble.tf,.bubble.call,.bubble.xsh,.bubble.quiz{white-space:normal}
 .bubble.pad0{padding:4px}
 /* X 帖子转发卡片 */
 .bubble.xsh{display:block;min-width:180px;max-width:232px;padding:9px 12px 10px}
@@ -572,6 +572,30 @@ body{background:#0A0A0C;color:var(--text);
 .fdta{margin-top:8px;padding-top:8px;border-top:.5px solid var(--line);font-size:12.5px;color:var(--sub)}
 .fdc{margin-top:4px;color:var(--text)}
 .bubble.xsh .xh .fdp{margin:0}
+/* 答题卡（转发到聊天里的） */
+.bubble.quiz{display:block;min-width:190px;max-width:240px;padding:10px 12px 10px}
+.bubble.quiz .qh{font-size:11.5px;opacity:.7;margin-bottom:5px;letter-spacing:.3px}
+.bubble.quiz .qq{font-size:13.5px;font-weight:600;line-height:1.5}
+.bubble.quiz .qa{font-size:13.5px;line-height:1.55;margin-top:6px;padding:7px 9px;border-radius:9px;background:rgba(0,0,0,.08)}
+.bubble.quiz .qa b{font-weight:600;opacity:.75;margin-right:4px}
+.bubble.quiz .cap{margin-top:8px;font-size:14px}
+/* 答题 App */
+.qzset{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow-s);display:flex;align-items:center;gap:10px}
+.qzset .qn{flex:1;min-width:0}
+.qzset .qn b{display:block;font-size:14.5px;font-weight:600;color:var(--text)}
+.qzset .qn small{display:block;font-size:12px;color:var(--sub);margin-top:2px}
+.qzres{background:var(--card);border-radius:14px;padding:11px 14px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow-s)}
+.qzres b{font-size:14px;color:var(--text)}
+.qzres small{display:block;font-size:12px;color:var(--sub);margin-top:2px}
+.qzitem{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--shadow-s)}
+.qzitem .qi{font-size:12px;color:var(--sub);margin-bottom:3px}
+.qzitem .qt{font-size:14.5px;font-weight:600;color:var(--text);line-height:1.5}
+.qzitem .qo{margin-top:6px;font-size:13px;color:var(--sub);line-height:1.6}
+.qzitem .qo .on{color:var(--accent);font-weight:600}
+.qzitem .qa{margin-top:8px;font-size:14px;line-height:1.6;color:var(--text);padding:8px 10px;border-radius:10px;background:var(--accent-soft)}
+.qzitem .qact{margin-top:8px;display:flex;gap:8px}
+.qztype{font-size:34px;font-weight:800;letter-spacing:2px;color:var(--accent);text-align:center;padding:14px 0 4px}
+.qztype small{display:block;font-size:13px;font-weight:500;letter-spacing:0;color:var(--sub);margin-top:4px}
 /* 聊天页夜晚模式：只在非沉浸下生效；沉浸模式有背景图自己管色 */
 #phone.cnight:not(.imm) #s-chat{
   --chat-bg:linear-gradient(180deg,#16122B 0%,#0A0A0F 46%,#000 100%);
@@ -3906,10 +3930,33 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 主接口的拉取写死了读 `s-base / s-key`、写回 `s-model`。抽成 `fetchModelsFrom(base,key,btn)`，用 `modelTarget` 记录这次是给哪个框选；`fetchModels2()` 按 `genEp()` 同一套回落规则取地址和 Key（没填就用主接口的），选完直接写进 `S.api2.model` 落库，因为那一组是即填即存、没有保存按钮。
 
+### 2026-09-13（六）· 「答题」：让 TA 自己做问卷，答案可以拿到聊天里讨论
+
+用户：想要一个类似测试题的功能，姬照自己选答案或者输入，放「情侣相性 100 问」「MBTI 测试」这类，用户看它的结果、回复它的答案、转发到主聊天一起讨论。
+
+**TA 的手机 → 答题**。内置三套：
+
+- **情侣相性 100 问**：一百道自己写的，按主题排（第一印象 / 吵架 / 日常 / 家人 / 礼物 / 吃醋 / 未来 / 亲密 / 旅行 / 爱 / 收尾）。四次调用
+- **MBTI 28 题**：每个维度 7 道二选一，选 A 记前一个字母，本地算出四个字母，附一行称号。一次调用
+- **灵魂拷问 20 题**：不好答的。一次调用
+
+也能**粘贴自己的题库**：一行一题，选择题写「题目 | A. 选项 | B. 选项」，第一行 `# 名字` 是题库名，存在全局设置里所有角色共用。
+
+**做题走主模型**，每 30 题一次调用。提示词带 `storyCtx()` 加风格示例，要求「用你自己的口吻、第一人称、诚实地」答，可以敷衍、毒舌、拒答，但每个字得是 TA 会说的话；情侣题里的"我"明确指向当前身份。输出 `{"answers":[{"q":题号,"pick":"字母","a":"回答"}]}`，按题号对齐回填，漏答的显示「没答」。结果存 `c.quizzes`（最多 30 份）。
+
+**讨论这题**：结果页每道题下面一个按钮，弹框让你写一句话（可留空），然后以**你**的身份往主聊天发一张答题卡（题目 + TA 当时的答案 + 你的话，`type:'quiz'`），跳到聊天页，直接叫 TA 回一轮。历史里这条写成「[翻出你做的「…」里的一题——问：… 你当时答：…] 你的话」，TA 知道自己当时怎么答的，接得上。
+
+顺带修了部署链：之前 `… && until …; done; echo LIVE` 里最后那个 `echo` 不受 `&&` 约束，前面失败它也会打印 LIVE，害我误判过一次。改成 `&& { until …; echo LIVE; }`；题库条数也加了 node 校验，数不对就不推。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **"让角色独处时表达自己"是比"再加一个对话入口"更值钱的方向** → 问卷、日记、刷到的、起居注都属于这一类：角色不面对用户时在做什么、想什么。这些内容回到聊天里才有"你翻出来问 TA"的戏剧性。
+- **用户侧发起的讨论，卡片要以用户身份落库** → 转发到聊天的答题卡是 user 消息，不是 assistant，这样 TA 收到的是"你在问我"，而不是"我又说了一遍"。
+- **部署链的成功信号必须在 `&&` 链内** → `a && b; echo OK` 的 `echo` 永远执行，等于没有信号。写成 `a && b && { …; echo OK; }`。
+- **不用 `rep()` 就得自己转 CRLF** → 直接 `s.count(old)` 用 `
+` 拼的字符串在 CRLF 文件里永远是 0，报的是 AssertionError 不是"换行不对"，很容易以为是内容变了。
 - **复制一套配置 UI 时，把它带的辅助动作一起复制** → 主接口有拉取、测试，第二接口只复制了输入框。用户第一眼就问"拉取呢"。
 - **"每天都一样"的根因是模型没有昨天** → 只存当天的数据，模型就只能从人设推"典型的一天"，天天一样是必然。要多样性先给它历史（别重复什么），再给随机变量（必须加进什么），两个都要。
 - **同一种内容有几条渲染路径，样式要一起改** → 带引用的气泡和普通气泡是两段代码，普通那段早就走 CSS 变量了，引用那段还写死白色。改样式时 grep 一遍所有 `class="bubble`。
@@ -4168,7 +4215,7 @@ const DEFAULT_SETTINGS={
   styleExamples:DEFAULT_STYLE, memoryEnabled:true, memCore:10, memEpisodic:8, visionEnabled:true,
   notifyOn:false, accent:'#7A68F0', showLog:false, presetId:'',
   memAuto:true, memEvery:12, rfMerge:true,
-  homeBg:'', homeImm:true, mmCover:'', xposts:[], glassMode:'mix', weather:{mode:'',i:.5,chat:false},
+  homeBg:'', homeImm:true, mmCover:'', xposts:[], quizSets:[], glassMode:'mix', weather:{mode:'',i:.5,chat:false},
   kbMode:'auto',
   oracle:{mode:'watcher',text:''},
   img:{backend:'novelai',base:'https://image.novelai.net',key:'',model:'nai-diffusion-4-5-full',autoPost:true,
@@ -7600,6 +7647,14 @@ function bubbleHTML(m,cfg,isMe){
       <div class="xt">${esc(x.text||'')}</div>
       ${m.content?`<div class="cap">${esc(m.content)}</div>`:''}</div>`;
   }
+  if(m.type==='quiz'){
+    const x=m.meta||{};
+    return `<div class="bubble quiz" ${style}>
+      <div class="qh">答题卡 · ${esc(x.title||'')}</div>
+      <div class="qq">${esc(x.q||'')}</div>
+      <div class="qa"><b>${esc(x.who||'TA')}</b>${x.pick?esc(x.pick)+'　':''}${esc(x.a||'')}</div>
+      ${m.content?`<div class="cap">${esc(m.content)}</div>`:''}</div>`;
+  }
   if(m.type==='fsh'){
     const x=m.meta||{};
     return `<div class="bubble xsh" ${style} onclick="event.stopPropagation();showFeedCard('${m.id}')">
@@ -9799,6 +9854,7 @@ function phoneApp(k){
   const c=characters.find(x=>x.id===curCharId);
   if(k==='shop'&&!((c.phone||{}).shop)){ openApp('shop'); return refreshShop(); }
   if(k==='feed'&&!(((c.phone||{}).feed||{}).items||[]).length){ openApp('feed'); return refreshFeed(); }
+  if(k==='quiz'){ quizView=null; return openApp('quiz'); }
   if(k==='mood')   return openMood();
   if(k==='diary')  return openDiary();
   if(k==='lithium')return openLi();
@@ -9816,13 +9872,14 @@ const asBrow=x=>typeof x==='string'?{title:x,site:'',time:''}:
   {title:String((x&&x.title)||'').slice(0,40),site:String((x&&x.site)||'').slice(0,20),
    time:String((x&&x.time)||'').slice(0,8)};
 
-const APP_TITLES={notes:'备忘录',music:'音乐',browser:'浏览器',calendar:'日程',chats:'聊天',shop:'购物',feed:'刷到的'};
+const APP_TITLES={notes:'备忘录',music:'音乐',browser:'浏览器',calendar:'日程',chats:'聊天',shop:'购物',feed:'刷到的',quiz:'答题'};
 let curApp='';
 function openApp(k){ curApp=k; goTo('s-app',()=>renderApp(k)); }
 function appRefresh(){
   if(curApp==='calendar') return refreshJournal();
   if(curApp==='shop') return refreshShop();
   if(curApp==='feed') return refreshFeed();
+  if(curApp==='quiz') return toast('在题库里点「让 TA 做」');
   refreshStatus();
 }
 function renderApp(k){
@@ -9880,6 +9937,7 @@ function renderApp(k){
   else if(k==='calendar'){
     renderJournal(box);
   }
+  else if(k==='quiz'){ renderQuizApp(box,c); }
   else if(k==='feed'){
     const items=((p.feed||{}).items)||[];
     if(!items.length) return box.innerHTML=empty('还没刷过');
@@ -13794,7 +13852,8 @@ const APP_DEFS=[
   {k:'mood',    n:'心情',    c:'#8B5CF6', ic:'thought'},
   {k:'chats',   n:'聊天',    c:'#22C55E', ic:'quote'},
   {k:'shop',    n:'购物',    c:'#F97316', ic:'star'},
-  {k:'feed',    n:'刷到的',  c:'linear-gradient(140deg,#111 0%,#FF2442 100%)', ic:'sparkle'}
+  {k:'feed',    n:'刷到的',  c:'linear-gradient(140deg,#111 0%,#FF2442 100%)', ic:'sparkle'},
+  {k:'quiz',    n:'答题',    c:'#0EA5E9', ic:'check'}
 ];
 /* dock 四个位置：前两个和主屏共用图标设置，后两个是 dock 专属 */
 const DOCK_KEYS=['chats','lithium','diary','refresh'];
@@ -14612,6 +14671,190 @@ async function retryChatImage(id){
   if(m.meta.genErr&&!confirm('上次失败：'+m.meta.genErr+'\n\n再试一次？')) return;
   m.meta.pending=true; await dbPut('messages',m); await renderChat(); genChatImage(id);
 }
+/* ============================================================
+   答题：让 TA 自己做问卷。内置三套 + 自己粘贴的题库。
+   答案存在 c.quizzes；每题可以转到主聊天里讨论（一张答题卡 + 你的话，TA 接着回）。
+   做题走主模型 —— 这是 TA 的声音，不是"镜子型"内容。每 30 题一次调用。
+   ============================================================ */
+const QZ_COUPLE=[
+  '第一次见到我时的第一印象是什么？','你觉得我最好看的时刻是什么时候？','我身上哪个习惯让你最受不了？','你觉得我们谁更依赖谁？','你最喜欢我叫你什么？',
+  '我们之间谁先喜欢上对方的？','你什么时候意识到自己喜欢我的？','如果用一种天气形容我，是什么？','你觉得我像什么动物？','你会怎么向陌生人介绍我？',
+  '我们吵架的时候，通常谁先低头？','你最讨厌我说哪句话？','冷战的时候你在想什么？','你觉得我最不讲道理的一次是哪次？','吵完架你会想些什么？',
+  '如果我一天没回你消息，你会怎么想？','你介意我和异性单独吃饭吗？','你手机里有没有不想让我看的东西？','你会偷偷看我的手机吗？','你觉得我们之间最大的秘密是什么？',
+  '早上醒来第一件事想到的是什么？','你最想和我一起做的一件小事是什么？','一起吃饭的时候你在看什么？','你喜欢我什么时候的样子？','我做饭你会吃吗？',
+  '你最喜欢我们之间的哪个瞬间？','有没有哪一刻你觉得"就是这个人了"？','你会为我改变什么？','你不会为我改变什么？','你觉得我们最像的地方是什么？',
+  '如果我生病了你会怎么做？','你会怎么哄我？','你觉得我哭的时候你该做什么？','你最怕我说什么？','你最想听我说什么？',
+  '我们各自的朋友你更喜欢谁？','你想带我去见谁？','你会跟你家里人怎么提我？','你觉得我父母会喜欢你吗？','如果家里人反对我们呢？',
+  '你会送我什么礼物？','你觉得我最想要什么？','你最想收到我的什么？','纪念日你记得吗？','忘了纪念日怎么办？',
+  '你觉得我们谁更花心？','你吃醋吗？吃醋的时候什么样？','你会因为什么和我分手？','分手了你会怎么样？','你觉得我们会分手吗？',
+  '你想和我住在什么样的地方？','一起住的话谁做家务？','你想养什么？','你想要孩子吗？','你觉得我们十年后是什么样？',
+  '你会怎么形容我们的关系？','你有没有对我说过谎？','你最后悔的一件事是什么？','你想对以前的我说什么？','你想对以后的我说什么？',
+  '我什么时候最烦人？','我什么时候最可爱？','你偷偷看过我几次？','你有没有梦到过我？','梦里我在干什么？',
+  '你喜欢牵手还是拥抱？','你喜欢我主动还是你主动？','接吻的时候你在想什么？','你觉得亲密的时候最重要的是什么？','你介意我在外面亲你吗？',
+  '你觉得我懂你吗？','你觉得你懂我吗？','有没有什么话你一直没说出口？','你最想问我什么？','你觉得我最想问你什么？',
+  '我们一起旅行你想去哪？','旅行的时候谁负责规划？','迷路了怎么办？','你会为我等多久？','你等过我最久的一次是多久？',
+  '你觉得爱是什么？','你觉得我爱你吗？','你怎么知道的？','你爱我吗？','你什么时候最确定？',
+  '用一句话对我说点什么。','如果只能留一张我们的照片，你留哪张？','我们之间有没有一首歌？','你想给我们的故事起什么名字？','这份问卷你答得诚实吗？',
+  '你觉得我会怎么看你的答案？','有哪道题你想改答案？','有哪道题你不想让我看？','做完这份问卷你现在什么心情？','现在想对我说什么？',
+  '你觉得我们谁更会撒谎？','你会在我面前哭吗？','你最想和我一起养成的习惯是什么？','你觉得我最不了解你的地方是什么？','如果重来一次，你还会选我吗？'
+];
+const QZ_MBTI=[
+  ['和一群人待一晚上之后，你','更有精神了','需要一个人缓一缓','EI'],['周末你更愿意','出去见人','在家待着','EI'],['你说话的方式是','想到就说','想好再说','EI'],
+  ['遇到烦心事你会','找人说','自己消化','EI'],['新环境里你','很快熟起来','先观察一阵','EI'],['你的朋友','很多，都不算特别深','很少，但很深','EI'],['打电话和发消息，你','更喜欢打电话','更喜欢发消息','EI'],
+  ['你更相信','亲眼看到的','直觉感觉到的','SN'],['学新东西你喜欢','一步步照着来','先看整体再自己摸','SN'],['你更常想','眼前的事','以后的可能','SN'],
+  ['别人说你','踏实','有想法','SN'],['看电影你在意','情节合不合理','它想表达什么','SN'],['你的房间','东西各有位置','乱但自己找得到','SN'],['你更擅长','把事情做完','想出新做法','SN'],
+  ['做决定时你更看','对不对','人会不会难受','TF'],['朋友抱怨的时候你','帮他分析','先陪着他','TF'],['你被夸更开心的是','你很厉害','你人很好','TF'],
+  ['和人起冲突你','把道理讲清楚','尽量别伤感情','TF'],['你觉得公平比温柔','重要','不一定','TF'],['别人哭了你','有点不知所措','会跟着难受','TF'],['你更怕别人说你','蠢','冷漠','TF'],
+  ['出门前你','早就想好路线','到了再说','JP'],['计划被打乱你','很烦','无所谓','JP'],['你的作业或工作','提前做完','拖到最后','JP'],
+  ['旅行你喜欢','排好行程','随便走走','JP'],['你更受不了','事情没定下来','被规矩绑住','JP'],['桌面上','很整齐','东西堆着','JP'],['做决定你','越快越好','再等等看','JP']
+];
+const QZ_SOUL=[
+  '你最怕被人发现的一面是什么？','你上一次哭是因为什么？','你有没有一件事从来没跟任何人说过？','如果明天就是最后一天，你今天会做什么？','你最嫉妒谁？',
+  '你觉得自己最大的缺点是什么？','你有没有恨过自己？','你最想删掉的一段记忆是什么？','你觉得别人误解你最深的是什么？','你什么时候觉得最孤独？',
+  '你最想对小时候的自己说什么？','你有没有假装过喜欢一个人？','你觉得自己值得被爱吗？','你最怕失去什么？','你最不想承认的一件事是什么？',
+  '你有没有伤害过一个对你好的人？','你觉得自己是好人吗？','你现在最想逃避什么？','你最后一次真心笑是什么时候？','现在，你最想要什么？'
+];
+const QUIZ_BUILTIN=[
+  {id:'couple100',title:'情侣相性 100 问',desc:'一百道题，从第一印象问到十年后。四次调用',items:QZ_COUPLE.map(q=>({q}))},
+  {id:'mbti28',title:'MBTI 28 题',desc:'二选一，做完直接算出四个字母。一次调用',mbti:true,items:QZ_MBTI.map(x=>({q:x[0],opts:['A. '+x[1],'B. '+x[2]],dim:x[3]}))},
+  {id:'soul20',title:'灵魂拷问 20 题',desc:'不好答的二十道。一次调用',items:QZ_SOUL.map(q=>({q}))}
+];
+const quizSets=()=>[...QUIZ_BUILTIN,...((S.quizSets||[]).map(x=>({...x,custom:true})))];
+const quizSetOf=id=>quizSets().find(x=>x.id===id);
+let quizView=null;   // null=题库列表；{rid}=看某份结果
+
+function renderQuizApp(box,c){
+  const results=(c.quizzes||[]);
+  if(quizView&&quizView.rid){
+    const r=results.find(x=>x.id===quizView.rid);
+    if(!r){ quizView=null; return renderQuizApp(box,c); }
+    const set=quizSetOf(r.setId)||{title:r.title,items:[]};
+    box.innerHTML=`<div class="appwrap">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <button class="mini" onclick="quizView=null;renderApp('quiz')">‹ 题库</button>
+        <b style="flex:1;font-size:15px">${esc(r.title)}</b>
+        <button class="mini" onclick="quizResMenu('${r.id}')">···</button></div>
+      ${r.mbti?`<div class="qztype">${esc(r.mbti)}<small>${esc(MBTI_DESC[r.mbti]||'')}</small></div>`:''}
+      ${r.answers.map((a,i)=>`<div class="qzitem">
+        <div class="qi">第 ${i+1} 题</div>
+        <div class="qt">${esc(a.q)}</div>
+        ${(a.opts||[]).length?`<div class="qo">${a.opts.map(o=>`<div class="${a.pick&&o.startsWith(a.pick+'.')?'on':''}">${esc(o)}</div>`).join('')}</div>`:''}
+        <div class="qa">${esc(c.name)}：${a.pick?esc(a.pick)+'　':''}${esc(a.a||'（没答）')}</div>
+        <div class="qact"><button class="mini" onclick="quizDiscuss('${r.id}',${i})">讨论这题</button></div>
+      </div>`).join('')}
+      <div class="hint" style="padding:6px 4px 0">「讨论这题」会把题目和 TA 的答案做成一张卡片发进主聊天，带上你想说的话，TA 接着回你。</div>
+    </div>`;
+    return;
+  }
+  box.innerHTML=`<div class="appwrap">
+    <div class="grouptitle" style="margin:2px 0 8px 4px">题库</div>
+    ${quizSets().map(st=>`<div class="qzset">
+      <div class="qn"><b>${esc(st.title)}</b><small>${esc(st.desc||'')}　${st.items.length} 题${st.custom?'　自定义':''}</small></div>
+      <button class="mini" onclick="runQuiz('${st.id}')">让 TA 做</button>
+      ${st.custom?`<button class="mini" style="color:var(--danger)" onclick="delQuizSet('${st.id}')">删</button>`:''}
+    </div>`).join('')}
+    <div style="display:flex;gap:8px;margin:4px 0 14px"><button class="mini" onclick="importQuizSet()">粘贴一套题</button></div>
+    ${results.length?`<div class="grouptitle" style="margin:2px 0 8px 4px">${esc(c.name)} 做过的</div>`:''}
+    ${results.map(r=>`<div class="qzres" onclick="quizView={rid:'${r.id}'};renderApp('quiz')">
+      <b>${esc(r.title)}${r.mbti?'　'+esc(r.mbti):''}</b><small>${fmtTime(r.at)} · ${r.answers.length} 题</small></div>`).join('')}
+    <div class="hint" style="padding:10px 4px 0">TA 会用自己的口吻诚实作答，可以敷衍、可以毒舌。做题走主模型，每 30 题一次调用。
+      自己的题库：一行一题，选择题写成「题目 | A. 选项 | B. 选项」。</div>
+  </div>`;
+}
+const MBTI_DESC={INTJ:'建筑师',INTP:'逻辑学家',ENTJ:'指挥官',ENTP:'辩论家',INFJ:'提倡者',INFP:'调停者',ENFJ:'主人公',ENFP:'竞选者',
+  ISTJ:'物流师',ISFJ:'守卫者',ESTJ:'总经理',ESFJ:'执政官',ISTP:'鉴赏家',ISFP:'探险家',ESTP:'企业家',ESFP:'表演者'};
+
+let quizBusy=false;
+async function runQuiz(setId){
+  if(quizBusy) return toast('还在做上一份');
+  const c=characters.find(x=>x.id===curCharId), me=personaOf(c);
+  const set=quizSetOf(setId); if(!c||!set) return;
+  const calls=Math.ceil(set.items.length/30);
+  if(!confirm(`让「${c.name}」做「${set.title}」？${set.items.length} 题，${calls} 次调用。`)) return;
+  quizBusy=true;
+  const style=String(chatCfg(c).styleExamples||'').trim()||String(S.styleExamples||'').trim();
+  const answers=[];
+  try{
+    for(let k=0;k<set.items.length;k+=30){
+      const chunk=set.items.slice(k,k+30);
+      toast(`做题中 ${Math.min(k+30,set.items.length)}/${set.items.length}…`);
+      const ms=(await msgsOf(c.id)).slice(-10);
+      const p=`${storyCtx(c,{msgs:ms,take:10,skip:['social']})}
+${style?NL+'# 你的说话方式（照这个语感写，不要照抄内容）'+NL+style+NL:''}
+你在做一份问卷「${set.title}」。**用你自己的口吻、第一人称、诚实地**回答——可以敷衍、可以毒舌、可以认真、可以拒答某一题，但每一个字都得是你会说的话。
+${set.id==='couple100'||/情侣|相性|恋人/.test(set.title)?`问卷里的"我"指的是「${esc0(me.name)}」，也就是你的聊天对象。`:''}
+题目（有选项的必须从选项里选一个）：
+${chunk.map((it,i)=>(k+i+1)+'. '+it.q+((it.opts||[]).length?'　'+it.opts.join('　'):'')).join(NL)}
+
+只输出 JSON：{"answers":[{"q":题号,"pick":"选的字母，没选项就留空","a":"你的回答，5-40 字，选择题也补一句为什么"}]}
+- ${chunk.length} 题一题不落，题号照抄
+- 不要解释、不要问卷之外的话`;
+      let t=(await callAPI([{role:'user',content:p}])).trim().replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim();
+      const mm=t.match(/\{[\s\S]*\}/); if(mm) t=mm[0];
+      const j=JSON.parse(t);
+      const byQ={}; for(const a of (j.answers||[])){ const n=parseInt(a.q,10); if(n>0) byQ[n]=a; }
+      chunk.forEach((it,i)=>{
+        const a=byQ[k+i+1]||{};
+        let pick=String(a.pick||'').trim().toUpperCase().replace(/[^A-Z]/g,'').slice(0,1);
+        if(!(it.opts||[]).length) pick='';
+        answers.push({q:it.q,opts:it.opts||[],dim:it.dim||'',pick,a:String(a.a||'').trim().slice(0,120)});
+      });
+    }
+    let mbti='';
+    if(set.mbti){
+      const sc={E:0,I:0,S:0,N:0,T:0,F:0,J:0,P:0};
+      for(const a of answers){ if(!a.dim||!a.pick) continue; const L=a.pick==='A'?a.dim[0]:a.dim[1]; sc[L]++; }
+      mbti=(sc.E>=sc.I?'E':'I')+(sc.S>=sc.N?'S':'N')+(sc.T>=sc.F?'T':'F')+(sc.J>=sc.P?'J':'P');
+    }
+    const rec={id:uid(),setId:set.id,title:set.title,at:Date.now(),answers,mbti};
+    c.quizzes=[rec,...(c.quizzes||[])].slice(0,30);
+    await dbPut('characters',c); characters=await dbAll('characters');
+    quizView={rid:rec.id};
+    if(document.getElementById('s-app').classList.contains('active')&&curApp==='quiz') renderApp('quiz');
+    toast('做完了'+(mbti?'，是 '+mbti:''));
+  }catch(e){ toast('做题失败：'+String(e.message).slice(0,60)); }
+  finally{ quizBusy=false; }
+}
+function quizResMenu(rid){
+  const c=characters.find(x=>x.id===curCharId);
+  const r=(c.quizzes||[]).find(x=>x.id===rid); if(!r) return;
+  actionSheet(r.title,[
+    {ic:'refresh',t:'重做一遍',fn:()=>runQuiz(r.setId)},
+    {ic:'trash',t:'删掉这份',danger:true,fn:async()=>{ c.quizzes=c.quizzes.filter(x=>x.id!==rid); await dbPut('characters',c); characters=await dbAll('characters'); quizView=null; renderApp('quiz'); }}
+  ]);
+}
+/* 把一题连答案做成卡片发进主聊天，带上你的话，TA 接着回 */
+async function quizDiscuss(rid,i){
+  const c=characters.find(x=>x.id===curCharId);
+  const r=(c.quizzes||[]).find(x=>x.id===rid); if(!r) return;
+  const a=r.answers[i]; if(!a) return;
+  const t=prompt('想跟 TA 说什么？（可以留空，直接把这题甩过去）','');
+  if(t===null) return;
+  await dbPut('messages',{id:uid(),characterId:c.id,role:'user',type:'quiz',content:String(t).trim().slice(0,200),
+    meta:{title:r.title,q:a.q,a:a.a,pick:a.pick,who:c.name},timestamp:Date.now()});
+  navReset('s-chat'); show('s-chat'); await renderChat();
+  askAI();
+}
+function importQuizSet(){
+  const raw=prompt('一行一题。选择题写成「题目 | A. 选项 | B. 选项」。第一行如果以 # 开头就是题库名。','');
+  if(!raw||!raw.trim()) return;
+  const lines=raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  let title='自定义题库';
+  if(lines[0].startsWith('#')) title=lines.shift().replace(/^#+\s*/,'').slice(0,20)||title;
+  const items=lines.map(l=>{
+    const parts=l.split('|').map(x=>x.trim()).filter(Boolean);
+    const q=parts.shift().replace(/^\d+[.、)]\s*/,'');
+    const opts=parts.map((o,i)=>/^[A-Z]\./i.test(o)?o.toUpperCase().slice(0,1)+o.slice(1):String.fromCharCode(65+i)+'. '+o);
+    return {q,opts};
+  }).filter(x=>x.q);
+  if(!items.length) return toast('没解析出题目');
+  S.quizSets=[...(S.quizSets||[]),{id:'qs_'+uid(),title,desc:'自己粘贴的',items}];
+  dbPut('settings',S); renderApp('quiz'); toast('加了 '+items.length+' 题');
+}
+async function delQuizSet(id){
+  if(!confirm('删掉这套题？做过的结果不受影响')) return;
+  S.quizSets=(S.quizSets||[]).filter(x=>x.id!==id); await dbPut('settings',S); renderApp('quiz');
+}
 /* ---------- TA 翻你的手机 ----------
    一直只有「你看 TA 的手机」，反过来没有。把你这一侧能被看到的东西
    （X 帖子 / 朋友圈 / 日记 / 心情 / 你收藏的话）整理给模型，
@@ -15193,6 +15436,10 @@ function msgBody(m){
   if(m.type==='fsh'){
     const x=m.meta||{};
     return `[转发了一条${x.platform||''}——${x.author||''}：「${x.text||''}」]${m.content?'　'+m.content:''}`;
+  }
+  if(m.type==='quiz'){
+    const x=m.meta||{};
+    return `[翻出你做的「${x.title||''}」里的一题——问：${x.q||''}　你当时答：${x.pick?x.pick+' ':''}${x.a||''}]${m.content?'　'+m.content:''}`;
   }
   if(m.type==='location') return `[位置分享] ${m.content}${m.meta&&m.meta.addr?'（'+m.meta.addr+'）':''}`;
   return m.content;
