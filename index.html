@@ -3968,10 +3968,34 @@ X 小号私信那条路径走的是 `xDmPrompt`，不经过 `buildSystemPrompt`�
 
 **生图 401**：诊断里加了当前 Key 的状态——前 6 位、长度、NAI 的话检查是不是 `pst-` 开头、空的直接标红；并写明 persistent token 在改密码 / 退出所有设备 / 重新生成后会失效，之前能用不代表现在还能用。代码上没有任何路径会动 `S.img.key`（API 预设切换只碰 apiBase/apiKey/model），所以 401 基本就是 token 本身失效了。
 
+### 2026-09-15（一）· 「测试连接」会把刚填的生图 Key 打回旧的
+
+用户：pst key 过一会就失效，得不断换新的，能修吗。
+
+查 `S.img.key` 的所有写入路径，`testLink()` 里有一个真 bug：
+
+```js
+const saved={...S.img};                 // ← 快照
+S.img={...g,w:512,h:512,...};           // g 来自 readImgForm()，是**最新**的表单值
+await generateImage('1girl',null);      // 几秒
+S.img=saved;                            // ← 还原成快照
+```
+
+生图设置页的表单是**防抖 500ms 自动保存**的。粘贴新 Key 之后 500ms 内点「测试连接」，`saved` 拿到的还是**旧 Key**；测试本身用的是 `g`（新 Key）所以会通过；测完那句还原把内存里的 Key 打回旧的。于是：**测试显示全部通过，之后生图 401，刷新页面又好了**——因为库里存的是新的，只有内存被打回去了。完全对得上「用着用着就失效」。
+
+改法：测试前先 `imgAutosave()` 落一次库，快照自然是最新的；还原用 `setSImg()`。
+
+同一段还有第二个 bug：`generateImageRaw` 里记住 vibe 变体那句 `S.img={...S.img,v4VibeMode:…}; dbPut(...)` 在测试期间也会跑，而那时 `S.img` 是临时的 512x512、`vibeOn:false`，等于把**测试配置存成了正式设置**。加了 `_imgTesting` 标志挡住，`imgAutosave` 同样在测试期间跳过。
+
+**为了下次能一眼定性**：所有对 `S.img` 的赋值改走 `setSImg(next, why)`，Key 一变就往 `S.imgKeyLog` 记一笔（前 6 位 + 长度 + 时间 + 谁改的，留 20 条），401 诊断里直接列出最近 4 次。如果记录里只有她自己粘贴的那几次，那就是 NovelAI 那边 revoke 了，不是应用改的。
+
 ---
 
 ## 修过的坑（本次新增）
 
+- **「先快照、干活、再还原」这个模式，快照和干活用的必须是同一份数据** → 这里快照读的是已提交状态，干活读的是未提交的表单，还原就成了回滚用户的输入。要么先提交再快照，要么别还原。
+- **临时改全局状态去做一件事，期间任何异步写库都会把临时值变成正式值** → 测试用的 512x512 被 vibe 记忆那句顺手存成了正式设置。凡是临时覆盖全局配置，都要有一个「正在临时态」的标志，挡住这段时间里所有的持久化。
+- **「我的锅还是外部的锅」要让数据自己说话** → 给关键字段加一条变更日志（谁、何时、从什么变成什么），比任何推测都快。
 - **"多个声音一次调用"用 JSON 数组 + who 字段** → 不要给每个观众各调一次。让模型自己决定谁发言，解析时把不认识的 who 归到一个兜底身份，整段解析失败就当单声音，功能不会因为格式崩掉。
 - **输入栏的"上屏"和"叫模型"必须是两个动作** → 主聊天早就这样了，旁白页是后来单独写的，沿用了"回车即调用"。凡是对话式界面，回车只上屏，调用另给按钮，用户才能连发几条再要回复。
 - **鉴权失败的诊断要把"你现在填的是什么"摆出来** → 用户看到 401 第一反应是"代码坏了"，把 Key 前缀、长度、格式检查直接显示，能立刻区分是空的、格式不对、还是确实失效了。
@@ -11151,12 +11175,26 @@ const imgReadyFor=char=>char?imgReady():(imgReady()||img2Ready());
 
 let draftImg=null;
 let draftImg2=null, vibeSel=null, vibeTab='group';
+/* ---------- 生图 Key 的唯一写入口 ----------
+   用户反复遇到「pst key 用一阵就失效」。为了能分清是 NovelAI revoke 了，
+   还是应用自己把 Key 换掉了，所有对 S.img 的赋值都走这里，Key 一变就记一笔。 */
+let _imgTesting=false;
+function setSImg(next,why){
+  const oldK=String((S.img||{}).key||''), newK=String((next||{}).key||'');
+  S.img=next;
+  if(oldK!==newK){
+    const mask=k=>k?k.slice(0,6)+'…'+k.length:'(空)';
+    S.imgKeyLog=[{t:Date.now(),from:mask(oldK),to:mask(newK),why:why||''}]
+      .concat(S.imgKeyLog||[]).slice(0,20);
+    console.warn('生图 Key 变了：',mask(oldK),'->',mask(newK),'（'+(why||'')+'）');
+  }
+}
 /* 填了就存：每次重渲染时存一次，输入框打字时延迟 500ms 存一次 */
 let _imgSaveT=null;
 function imgAutosave(){
-  if(!draftImg) return;
+  if(!draftImg||_imgTesting) return;   // 测试期间 S.img 是临时的，别让自动保存掺进来
   readImgForm(); migrateImgPresets(draftImg);
-  S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
+  setSImg({...draftImg},'生图设置自动保存'); if(draftImg2) S.img2={...draftImg2};
   dbPut('settings',S).catch(()=>{});
 }
 function imgAutosaveSoon(){ clearTimeout(_imgSaveT); _imgSaveT=setTimeout(imgAutosave,500); }
@@ -11774,12 +11812,12 @@ async function fetchImg2Models(){
   }catch(e){ toast('拉取失败：'+e.message); }
 }
 function testImg2(){
-  readImgForm(); S.img={...draftImg}; S.img2={...draftImg2};
+  readImgForm(); setSImg({...draftImg},'第二后端试图'); S.img2={...draftImg2};
   openGen({scene:'rainy street at night, wet asphalt, neon reflections, no people, photo',route:'second',back:()=>{ renderImgCfg(); show('s-imgset'); }});
 }
 async function saveImgCfg(){
   readImgForm();
-  S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
+  setSImg({...draftImg},'点了保存'); if(draftImg2) S.img2={...draftImg2};
   await dbPut('settings',S);
   toast('已保存'); tab('s-settings');
 }
@@ -12161,7 +12199,8 @@ async function generateImageRaw(scene,char,opt){
       if(r.ok){
         if(lastImgReq){ lastImgReq.ok=true; lastImgReq.vibeMode=!vibe?'无':(v===null?'被拒，未带':(v.reference_information_extracted_multiple?'全字段':'去掉 info 数组')); S.lastImg={...lastImgReq}; dbPut('settings',S).catch(()=>{}); }
         if(vibe&&v===null) toast('vibe 参数被 NovelAI 拒绝（400），这张没带 vibe');
-        else if(vibe&&isV4&&i>0){ S.img={...(S.img||{}),v4VibeMode:v.reference_information_extracted_multiple?'full':'noinfo'}; dbPut('settings',S).catch(()=>{}); }
+        // 测试连接时 S.img 是临时的（512x512、关 vibe），这时候落库会把测试配置存成正式设置
+        else if(vibe&&isV4&&i>0&&!_imgTesting){ setSImg({...(S.img||{}),v4VibeMode:v.reference_information_extracted_multiple?'full':'noinfo'},'记住 vibe 变体'); dbPut('settings',S).catch(()=>{}); }
         return await unzipFirstPng(await r.arrayBuffer());
       }
       let d=''; try{ d=(await r.text()).slice(0,600); }catch(e){}
@@ -12314,12 +12353,20 @@ async function testLink(){
   const t0=performance.now();
   try{
     // NAI 只接受固定档位的尺寸，64x64 会被服务端判非法直接 500
+    //
+    // 这里以前是个真 bug：快照取的是**当时的 S.img**，而表单里的新 Key 要等
+    // 500ms 的防抖自动保存才会写进 S.img。在防抖触发之前点「测试连接」，
+    // 测完那句还原就把内存里的 Key 打回旧的那个 —— 测试明明通过，
+    // 之后生图却 401，刷新页面又好了。先落一次库，快照才是最新的。
+    imgAutosave();
     const saved={...S.img};
+    _imgTesting=true;
     S.img={...g,w:512,h:512,steps:Math.min(g.steps||28,28),vibeOn:false};
     let ok=false, err=null;
     try{ await generateImage('1girl',null); ok=true; }
     catch(e){ err=e; }
-    S.img=saved;
+    _imgTesting=false;
+    setSImg(saved,'测试结束还原');
     const ms=Math.round(performance.now()-t0);
     if(ok){
       setDiag(1,'ok',ms+'ms'); setDiag(2,'ok','通过'); setDiag(3,'ok','成功');
@@ -12346,6 +12393,7 @@ async function testLink(){
     if(code==='401'||code==='403'){
       setDiag(2,'bad',code+' 鉴权失败'); setDiag(3,'','');
       const _k=String(g.key||'');
+      const _lg=(S.imgKeyLog||[]).slice(0,4);
       diagHint=`服务器收到请求了，但不认这个 Key。<br>
         <b>现在填的 Key：</b>${_k?esc(_k.slice(0,6))+'…（'+_k.length+' 位'+(g.backend==='novelai'&&!/^pst-/.test(_k)?'，<span style="color:var(--danger)">不是 pst- 开头</span>':'')+'）':'<span style="color:var(--danger)">是空的</span>'}<br>
         · NovelAI 的 persistent token 会在你<b>改密码、退出所有设备、或重新生成</b>后失效，之前能用不代表现在还能用；去 NovelAI 重新 Get 一个贴进来。<br>
@@ -12353,6 +12401,8 @@ async function testLink(){
           在 NovelAI 网页版 → 设置 → Account → <b>Get Persistent API Token</b> 拿，
           不是网页登录用的那个 session token。<br>
         · 如果走反代，确认反代<b>转发了 Authorization 请求头</b>——很多反代默认会吞掉它。<br>
+        ${_lg.length?`<br><b>这个 Key 被改过几次：</b><br>`+_lg.map(x=>`　${fmtTime(x.t)}　${esc(x.from)} → ${esc(x.to)}　${esc(x.why||'')}`).join('<br>')
+          +`<br><span style="color:var(--sub)">如果这里只有你自己粘贴的那几次，那就是 NovelAI 那边把 token 作废了，不是应用改的。</span><br>`:''}
         · 有些中转要求 Key 填在别的位置或加别的前缀，看它自己的文档。<br>
         原始返回：${esc(msg)}`;
       renderDiag();
@@ -12452,7 +12502,7 @@ async function acceptGen(){
   if(fn) await fn(src,cap);
 }
 function testGen(){
-  readImgForm(); S.img={...draftImg}; if(draftImg2) S.img2={...draftImg2};
+  readImgForm(); setSImg({...draftImg},'试生成'); if(draftImg2) S.img2={...draftImg2};
   const c=characters.find(x=>x.id===S.img.selChar);
   openGen({charId:c?c.id:null,scene:c?'solo, upper body, looking at viewer':'1girl, solo, upper body, looking at viewer',back:()=>{ renderImgCfg(); show('s-imgset'); }});
 }
